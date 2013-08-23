@@ -1,5 +1,6 @@
 import collections
 import csv
+import multiprocessing as mp
 import os
 import datetime
 import sys
@@ -8,6 +9,7 @@ import re
 import ckan.include.rjsmin as rjsmin
 import ckan.include.rcssmin as rcssmin
 import ckan.lib.fanstatic_resources as fanstatic_resources
+import sqlalchemy as sa
 
 import paste.script
 from paste.registry import Registry
@@ -69,7 +71,7 @@ class CkanCommand(paste.script.command.Command):
     default_verbosity = 1
     group_name = 'ckan'
 
-    def _load_config(self):
+    def _get_config(self):
         from paste.deploy import appconfig
         if not self.options.config:
             msg = 'No config file supplied'
@@ -78,7 +80,10 @@ class CkanCommand(paste.script.command.Command):
         if not os.path.exists(self.filename):
             raise AssertionError('Config filename %r does not exist.' % self.filename)
         fileConfig(self.filename)
-        conf = appconfig('config:' + self.filename)
+        return appconfig('config:' + self.filename)
+
+    def _load_config(self):
+        conf = self._get_config()
         assert 'ckan' not in dir() # otherwise loggers would be disabled
         # We have now loaded the config. Now we can import ckan for the
         # first time.
@@ -308,12 +313,15 @@ class ManageDb(CkanCommand):
         print Session.execute('select version from migrate_version;').fetchall()
 
 
+
 class SearchIndexCommand(CkanCommand):
     '''Creates a search index for all datasets
 
     Usage:
       search-index [-i] [-o] [-r] [-e] rebuild [dataset_name]  - reindex dataset_name if given, if not then rebuild
                                                                  full search index (all datasets)
+      search-index rebuild_fast                                - reindex using multiprocessing using all cores. 
+                                                                 This acts in the same way as rubuild -r [EXPERIMENTAL]
       search-index check                                       - checks for datasets not indexed
       search-index show DATASET_NAME                           - shows index of a dataset
       search-index clear [dataset_name]                        - clears the search index for the provided dataset or
@@ -346,14 +354,18 @@ Default is false.'''
                     )
 
     def command(self):
-        self._load_config()
-
         if not self.args:
             # default to printing help
             print self.usage
             return
 
         cmd = self.args[0]
+        # Do not run load_config yet
+        if cmd == 'rebuild_fast':
+            self.rebuild_fast()
+            return
+
+        self._load_config()
         if cmd == 'rebuild':
             self.rebuild()
         elif cmd == 'check':
@@ -401,6 +413,44 @@ Default is false.'''
 
         package_id =self.args[1] if len(self.args) > 1 else None
         clear(package_id)
+
+    def rebuild_fast(self):
+        ###  Get out config but without starting pylons environment ####
+        conf = self._get_config()
+
+        ### Get ids using own engine, otherwise multiprocess will balk
+        db_url = conf['sqlalchemy.url']
+        engine = sa.create_engine(db_url)
+        package_ids = []
+        result = engine.execute("select id from package where state = 'active';")
+        for row in result:
+            package_ids.append(row[0])
+
+        def start(ids):
+            ## load actual enviroment for each subprocess, so each have thier own
+            ## sa session
+            self._load_config()
+            from ckan.lib.search import rebuild, commit
+            rebuild(package_ids=ids)
+            commit()
+
+        def chunks(l, n):
+            """ Yield n successive chunks from l.
+            """
+            newn = int(len(l) / n)
+            for i in xrange(0, n-1):
+                yield l[i*newn:i*newn+newn]
+            yield l[n*newn-newn:]
+
+        processes = []
+        for chunk in chunks(package_ids, mp.cpu_count()):
+            process = mp.Process(target=start, args=(chunk,))
+            processes.append(process)
+            process.daemon = True
+            process.start()
+
+        for process in processes:
+            process.join()
 
 class Notification(CkanCommand):
     '''Send out modification notifications.
@@ -1752,6 +1802,9 @@ class MinifyCommand(CkanCommand):
         paster minify ckan/public/base
         paster minify ckan/public/base/css/*.css
         paster minify ckan/public/base/css/red.css
+
+    if the --clean option is provided any minified files will be removed.
+
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
@@ -1759,20 +1812,45 @@ class MinifyCommand(CkanCommand):
 
     exclude_dirs = ['vendor']
 
+    def __init__(self, name):
+
+        super(MinifyCommand, self).__init__(name)
+
+        self.parser.add_option('--clean', dest='clean',
+            action='store_true', default=False, help='remove any minified files in the path')
+
     def command(self):
+        clean = getattr(self.options, 'clean', False)
         self._load_config()
         for base_path in self.args:
             if os.path.isfile(base_path):
-                self.minify_file(base_path)
+                if clean:
+                    self.clear_minifyed(base_path)
+                else:
+                    self.minify_file(base_path)
             elif os.path.isdir(base_path):
                 for root, dirs, files in os.walk(base_path):
                     dirs[:] = [d for d in dirs if not d in self.exclude_dirs]
                     for filename in files:
                         path = os.path.join(root, filename)
-                        self.minify_file(path)
+                        if clean:
+                            self.clear_minifyed(path)
+                        else:
+                            self.minify_file(path)
             else:
                 # Path is neither a file or a dir?
                 continue
+
+    def clear_minifyed(self, path):
+        path_only, extension = os.path.splitext(path)
+
+        if extension not in ('.css', '.js'):
+            # This is not a js or css file.
+            return
+
+        if path_only.endswith('.min'):
+            print 'removing %s' % path
+            os.remove(path)
 
     def minify_file(self, path):
         '''Create the minified version of the given file.

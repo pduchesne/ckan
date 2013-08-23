@@ -96,6 +96,10 @@
     null,
     "Nahrát soubor"
   ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "Právě nahráváte soubor. Jste si opravdu jistí, že chcete tuto stránku opustit a ukončit tak nahrávání?"
+  ],
   "show less": [
     null,
     "ukázat méně"

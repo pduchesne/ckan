@@ -96,6 +96,10 @@
     null,
     "Вложить файл"
   ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "Вы загружаете файл. Вы уверены что хотите прервать ?"
+  ],
   "show less": [
     null,
     "показать меньше"

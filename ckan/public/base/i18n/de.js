@@ -42,7 +42,7 @@
   ],
   "Loading...": [
     null,
-    "Läd..."
+    "Lädt..."
   ],
   "No matches found": [
     null,
@@ -95,6 +95,10 @@
   "Upload a file": [
     null,
     "Datei hochladen"
+  ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "Eine Datei wird hochgeladen. Soll das wirklich abgebrochen werden?"
   ],
   "show less": [
     null,

@@ -96,6 +96,10 @@
     null,
     "Carregar un arxiu"
   ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "Esteu pujant un arxiu. Esteu segurs que voleu marxar de la pàgina i aturar la pujada?"
+  ],
   "show less": [
     null,
     "mostra menys"

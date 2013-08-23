@@ -96,6 +96,10 @@
     null,
     "Sube un archivo"
   ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "Estás subiendo un fichero. Estás seguro que quieres salir y parar esta subida?"
+  ],
   "show less": [
     null,
     "mostrar menos"

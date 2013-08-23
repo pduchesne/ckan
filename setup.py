@@ -17,10 +17,6 @@ setup(
     description=__description__,
     keywords='data packaging component tool server',
     long_description =__long_description__,
-    install_requires=[
-    ],
-    extras_require = {
-    },
     zip_safe=False,
     packages=find_packages(exclude=['ez_setup']),
     namespace_packages=['ckanext', 'ckanext.stats'],
@@ -121,7 +117,7 @@ setup(
     datastore=ckanext.datastore.plugin:DatastorePlugin
     test_tag_vocab_plugin=ckanext.test_tag_vocab_plugin:MockVocabTagsPlugin
     resource_proxy=ckanext.resourceproxy.plugin:ResourceProxy
-    json_preview=ckanext.jsonpreview.plugin:JsonPreview
+    text_preview=ckanext.textpreview.plugin:TextPreview
     pdf_preview=ckanext.pdfpreview.plugin:PdfPreview
     recline_preview=ckanext.reclinepreview.plugin:ReclinePreview
     example_itemplatehelpers=ckanext.example_itemplatehelpers.plugin:ExampleITemplateHelpersPlugin
@@ -131,7 +127,7 @@ setup(
     domain_object_mods = ckan.model.modification:DomainObjectModificationExtension
 
     [babel.extractors]
-	    ckan = ckan.lib.extract:extract_ckan
+    ckan = ckan.lib.extract:extract_ckan
     """,
     # setup.py test command needs a TestSuite so does not work with py.test
     # test_suite = 'nose.collector',

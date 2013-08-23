@@ -96,6 +96,10 @@
     null,
     "上傳檔案"
   ],
+  "You are uploading a file. Are you sure you want to navigate away and stop this upload?": [
+    null,
+    "你現在正在上傳一個檔案，確定要離開當前頁面及停止上傳檔案嗎？"
+  ],
   "show less": [
     null,
     "顯示較少"
