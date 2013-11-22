@@ -4,6 +4,7 @@ import uuid
 import logging
 import json
 import datetime
+import socket
 
 from pylons import config
 import sqlalchemy
@@ -14,6 +15,7 @@ import ckan.logic.action
 import ckan.logic.schema
 import ckan.lib.dictization.model_dictize as model_dictize
 import ckan.lib.navl.dictization_functions
+import ckan.model as model
 import ckan.model.misc as misc
 import ckan.plugins as plugins
 import ckan.lib.search as search
@@ -64,6 +66,13 @@ def site_read(context,data_dict=None):
 def package_list(context, data_dict):
     '''Return a list of the names of the site's datasets (packages).
 
+    :param limit: if given, the list of datasets will be broken into pages of
+        at most ``limit`` datasets per page and only one page will be returned
+        at a time (optional)
+    :type limit: int
+    :param offset: when ``limit`` is given, the offset to start returning packages from
+    :type offset: int
+
     :rtype: list of strings
 
     '''
@@ -72,13 +81,30 @@ def package_list(context, data_dict):
 
     _check_access('package_list', context, data_dict)
 
+    schema = context.get('schema', logic.schema.default_pagination_schema())
+    data_dict, errors = _validate(data_dict, schema, context)
+    if errors:
+        raise ValidationError(errors)
+
+
     package_revision_table = model.package_revision_table
     col = (package_revision_table.c.id
         if api == 2 else package_revision_table.c.name)
     query = _select([col])
-    query = query.where(_and_(package_revision_table.c.state=='active',
-        package_revision_table.c.current==True))
+    query = query.where(_and_(
+                package_revision_table.c.state=='active',
+                package_revision_table.c.current==True,
+                package_revision_table.c.private==False,
+                ))
     query = query.order_by(col)
+
+    limit = data_dict.get('limit')
+    if limit:
+        query = query.limit(limit)
+
+    offset = data_dict.get('offset')
+    if offset:
+        query = query.offset(offset)
     return list(zip(*query.execute())[0])
 
 def current_package_list_with_resources(context, data_dict):
@@ -270,6 +296,8 @@ def member_list(context, data_dict=None):
     :type capacity: string
 
     :rtype: list of (id, type, capacity) tuples
+
+    :raises: :class:`ckan.logic.NotFound`: if the group doesn't exist
 
     '''
     model = context['model']
@@ -664,6 +692,9 @@ def user_list(context, data_dict):
                  else_=model.User.fullname)
         )
 
+    # Filter deleted users
+    query = query.filter(model.User.state != model.State.DELETED)
+
     ## hack for pagination
     if context.get('return_query'):
         return query
@@ -747,24 +778,82 @@ def package_show(context, data_dict):
 
     _check_access('package_show', context, data_dict)
 
-    package_dict = model_dictize.package_dictize(pkg, context)
+    package_dict = None
+    use_cache = (context.get('use_cache', True)
+        and not 'revision_id' in context
+        and not 'revision_date' in context)
+    if use_cache:
+        try:
+            search_result = search.show(name_or_id)
+        except (search.SearchError, socket.error):
+            pass
+        else:
+            use_validated_cache = 'schema' not in context
+            if use_validated_cache and 'validated_data_dict' in search_result:
+                package_dict = json.loads(search_result['validated_data_dict'])
+                package_dict_validated = True
+            else:
+                package_dict = json.loads(search_result['data_dict'])
+                package_dict_validated = False
+            metadata_modified = pkg.metadata_modified.isoformat()
+            search_metadata_modified = search_result['metadata_modified']
+            # solr stores less precice datetime,
+            # truncate to 22 charactors to get good enough match
+            if metadata_modified[:22] != search_metadata_modified[:22]:
+                package_dict = None
+
+    if not package_dict:
+        package_dict = model_dictize.package_dictize(pkg, context)
+        package_dict_validated = False
+
+    # Add page-view tracking summary data to the package dict.
+    # If the package_dict came from the Solr cache then it will already have a
+    # potentially outdated tracking_summary, this will overwrite it with a
+    # current one.
+    package_dict['tracking_summary'] = model.TrackingSummary.get_for_package(
+        package_dict['id'])
+
+    # Add page-view tracking summary data to the package's resource dicts.
+    # If the package_dict came from the Solr cache then each resource dict will
+    # already have a potentially outdated tracking_summary, this will overwrite
+    # it with a current one.
+    for resource_dict in package_dict['resources']:
+        _add_tracking_summary_to_resource_dict(resource_dict, model)
+
+    if context.get('for_view'):
+        for item in plugins.PluginImplementations(plugins.IPackageController):
+            package_dict = item.before_view(package_dict)
 
     for item in plugins.PluginImplementations(plugins.IPackageController):
         item.read(pkg)
 
-    package_plugin = lib_plugins.lookup_package_plugin(package_dict['type'])
-    if 'schema' in context:
-        schema = context['schema']
-    else:
-        schema = package_plugin.show_package_schema()
+    for resource_dict in package_dict['resources']:
+        for item in plugins.PluginImplementations(plugins.IResourceController):
+            resource_dict = item.before_show(resource_dict)
 
-    if schema and context.get('validate', True):
-        package_dict, errors = _validate(package_dict, schema, context=context)
+    if not package_dict_validated:
+        package_plugin = lib_plugins.lookup_package_plugin(package_dict['type'])
+        if 'schema' in context:
+            schema = context['schema']
+        else:
+            schema = package_plugin.show_package_schema()
+            if schema and context.get('validate', True):
+                package_dict, errors = _validate(package_dict, schema,
+                    context=context)
 
     for item in plugins.PluginImplementations(plugins.IPackageController):
         item.after_show(context, package_dict)
 
     return package_dict
+
+
+def _add_tracking_summary_to_resource_dict(resource_dict, model):
+    '''Add page-view tracking summary data to the given resource dict.
+
+    '''
+    tracking_summary = model.TrackingSummary.get_for_resource(
+        resource_dict['url'])
+    resource_dict['tracking_summary'] = tracking_summary
 
 
 def resource_show(context, data_dict):
@@ -786,7 +875,14 @@ def resource_show(context, data_dict):
         raise NotFound
 
     _check_access('resource_show', context, data_dict)
-    return model_dictize.resource_dictize(resource, context)
+    resource_dict = model_dictize.resource_dictize(resource, context)
+
+    _add_tracking_summary_to_resource_dict(resource_dict, model)
+
+    for item in plugins.PluginImplementations(plugins.IResourceController):
+        resource_dict = item.before_show(resource_dict)
+
+    return resource_dict
 
 def resource_status_show(context, data_dict):
     '''Return the statuses of a resource's tasks.
@@ -818,6 +914,8 @@ def resource_status_show(context, data_dict):
 
     return result_list
 
+
+@logic.auth_audit_exempt
 def revision_show(context, data_dict):
     '''Return the details of a revision.
 
@@ -847,6 +945,10 @@ def _group_or_org_show(context, data_dict, is_org=False):
     context['group'] = group
 
     if group is None:
+        raise NotFound
+    if is_org and not group.is_organization:
+        raise NotFound
+    if not is_org and group.is_organization:
         raise NotFound
 
     if is_org:
@@ -1000,7 +1102,7 @@ def user_show(context, data_dict):
 
     revisions_list = []
     for revision in revisions_q.limit(20).all():
-        revision_dict = revision_show(context,{'id':revision.id})
+        revision_dict = logic.get_action('revision_show')(context,{'id':revision.id})
         revision_dict['state'] = revision.state
         revisions_list.append(revision_dict)
     user_dict['activity'] = revisions_list
@@ -1012,7 +1114,7 @@ def user_show(context, data_dict):
 
     for dataset in dataset_q:
         try:
-            dataset_dict = package_show(context, {'id': dataset.id})
+            dataset_dict = logic.get_action('package_show')(context, {'id': dataset.id})
         except logic.NotAuthorized:
             continue
         user_dict['datasets'].append(dataset_dict)
@@ -1171,7 +1273,9 @@ def user_autocomplete(context, data_dict):
     q = data_dict['q']
     limit = data_dict.get('limit', 20)
 
-    query = model.User.search(q).limit(limit)
+    query = model.User.search(q)
+    query = query.filter(model.User.state != model.State.DELETED)
+    query = query.limit(limit)
 
     user_list = []
     for user in query.all():
@@ -1219,8 +1323,9 @@ def package_search(context, data_dict):
     :param facet.mincount: the minimum counts for facet fields should be
         included in the results.
     :type facet.mincount: int
-    :param facet.limit: the maximum number of constraint counts that should be
-        returned for the facet fields. A negative value means unlimited
+    :param facet.limit: the maximum number of values the facet fields return.
+        A negative value means unlimited. This can be set instance-wide with
+        the :ref:`search.facets.limit` config option. Default is 50.
     :type facet.limit: int
     :param facet.field: the fields to facet upon.  Default empty.  If empty,
         then the returned facet information is empty.
@@ -1315,9 +1420,6 @@ def package_search(context, data_dict):
     # the extension may have decided that it is not necessary to perform
     # the query
     abort = data_dict.get('abort_search', False)
-
-    if data_dict.get('sort') in (None, 'rank'):
-        data_dict['sort'] = 'score desc, metadata_modified desc'
 
     if data_dict.get('sort') in (None, 'rank'):
         data_dict['sort'] = 'score desc, metadata_modified desc'
@@ -1769,10 +1871,10 @@ def task_status_show(context, data_dict):
 
     context['task_status'] = task_status
 
+    _check_access('task_status_show', context, data_dict)
+
     if task_status is None:
         raise NotFound
-
-    _check_access('task_status_show', context, data_dict)
 
     task_status_dict = model_dictize.task_status_dictize(task_status, context)
     return task_status_dict
@@ -1844,8 +1946,9 @@ def get_site_user(context, data_dict):
         user.sysadmin = True
         model.Session.add(user)
         model.Session.flush()
-        if not context.get('defer_commit'):
-            model.Session.commit()
+    if not context.get('defer_commit'):
+        model.repo.commit_and_remove()
+
     return {'name': user.name,
             'apikey': user.apikey}
 
@@ -2119,8 +2222,7 @@ def activity_detail_list(context, data_dict):
     # authorized to read.
     model = context['model']
     activity_id = _get_or_bust(data_dict, 'id')
-    activity_detail_objects = model.Session.query(
-        model.activity.ActivityDetail).filter_by(activity_id=activity_id).all()
+    activity_detail_objects = model.ActivityDetail.by_activity_id(activity_id)
     return model_dictize.activity_detail_list_dictize(activity_detail_objects, context)
 
 
@@ -2227,7 +2329,16 @@ def organization_activity_list_html(context, data_dict):
 
     '''
     activity_stream = organization_activity_list(context, data_dict)
-    return activity_streams.activity_list_to_html(context, activity_stream)
+    offset = int(data_dict.get('offset', 0))
+    extra_vars = {
+        'controller': 'organization',
+        'action': 'activity',
+        'id': data_dict['id'],
+        'offset': offset,
+        }
+
+    return activity_streams.activity_list_to_html(context, activity_stream,
+            extra_vars)
 
 def recently_changed_packages_activity_list_html(context, data_dict):
     '''Return the activity stream of all recently changed packages as HTML.
@@ -2550,9 +2661,10 @@ def followee_list(context, data_dict):
 
     # Get the followed objects.
     # TODO: Catch exceptions raised by these *_followee_list() functions?
+    # FIXME should we be changing the context like this it seems dangerous
     followee_dicts = []
     context['skip_validation'] = True
-    context['skip_authorization'] = True
+    context['ignore_auth'] = True
     for followee_list_function, followee_type in (
             (user_followee_list, 'user'),
             (dataset_followee_list, 'dataset'),
@@ -2587,8 +2699,7 @@ def user_followee_list(context, data_dict):
     :rtype: list of dictionaries
 
     '''
-    if not context.get('skip_authorization'):
-        _check_access('user_followee_list', context, data_dict)
+    _check_access('user_followee_list', context, data_dict)
 
     if not context.get('skip_validation'):
         schema = context.get('schema') or (
@@ -2618,8 +2729,7 @@ def dataset_followee_list(context, data_dict):
     :rtype: list of dictionaries
 
     '''
-    if not context.get('skip_authorization'):
-        _check_access('dataset_followee_list', context, data_dict)
+    _check_access('dataset_followee_list', context, data_dict)
 
     if not context.get('skip_validation'):
         schema = context.get('schema') or (
@@ -2650,8 +2760,7 @@ def group_followee_list(context, data_dict):
     :rtype: list of dictionaries
 
     '''
-    if not context.get('skip_authorization'):
-        _check_access('group_followee_list', context, data_dict)
+    _check_access('group_followee_list', context, data_dict)
 
     if not context.get('skip_validation'):
         schema = context.get('schema',
@@ -2822,4 +2931,5 @@ def member_roles_list(context, data_dict):
     :rtype: list of dictionaries
 
     '''
+    _check_access('member_roles_list', context, data_dict)
     return new_authz.roles_list()

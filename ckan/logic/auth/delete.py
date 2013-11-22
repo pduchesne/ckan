@@ -4,6 +4,12 @@ from ckan.logic.auth import get_package_object, get_group_object, get_related_ob
 from ckan.logic.auth import get_resource_object
 from ckan.lib.base import _
 
+
+def user_delete(context, data_dict):
+    # sysadmins only
+    return {'success': False}
+
+
 def package_delete(context, data_dict):
     user = context['user']
     package = get_package_object(context, data_dict)
@@ -83,6 +89,14 @@ def group_delete(context, data_dict):
         return {'success': False, 'msg': _('User %s not authorized to delete group %s') % (user ,group.id)}
     else:
         return {'success': True}
+
+def group_purge(context, data_dict):
+    # Only sysadmins are authorized to purge groups.
+    return {'success': False}
+
+def organization_purge(context, data_dict):
+    # Only sysadmins are authorized to purge organizations.
+    return {'success': False}
 
 def organization_delete(context, data_dict):
     group = get_group_object(context, data_dict)

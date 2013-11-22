@@ -27,9 +27,21 @@ CKAN release you're upgrading to:
    checkout newer versions of the extensions at this point as well. Refer to
    the documentation for each extension.
 
-#. Update CKAN's dependencies::
+#. Update CKAN's dependencies:
 
-     pip install --upgrade -r pip-requirements.txt
+   .. versionchanged:: 2.1
+      In CKAN 2.0 and earlier the requirements file was called
+      ``pip-requirements.txt``, not ``requirements.txt`` as below.
+
+   ::
+
+     pip install --upgrade -r requirements.txt
+
+#. Register any new or updated plugins:
+
+   ::
+
+     python setup.py develop
 
 #. If you are upgrading to a new :ref:`major release <releases>` you need to
    update your Solr schema symlink.

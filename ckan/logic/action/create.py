@@ -1,6 +1,8 @@
 '''API functions for adding data to CKAN.'''
 
 import logging
+import random
+import re
 
 from pylons import config
 import paste.deploy.converters
@@ -15,6 +17,9 @@ import ckan.logic.schema
 import ckan.lib.dictization.model_dictize as model_dictize
 import ckan.lib.dictization.model_save as model_save
 import ckan.lib.navl.dictization_functions
+import ckan.lib.uploader as uploader
+import ckan.lib.navl.validators as validators
+import ckan.lib.mailer as mailer
 
 from ckan.common import _
 
@@ -86,7 +91,7 @@ def package_create(context, data_dict):
     :param extras: the dataset's extras (optional), extras are arbitrary
         (key: value) metadata items that can be added to datasets, each extra
         dictionary should have keys ``'key'`` (a string), ``'value'`` (a
-        string), and optionally ``'deleted'``
+        string)
     :type extras: list of dataset extra dictionaries
     :param relationships_as_object: see ``package_relationship_create()`` for
         the format of relationship dictionaries (optional)
@@ -152,10 +157,14 @@ def package_create(context, data_dict):
     else:
         rev.message = _(u'REST API: Create object %s') % data.get("name")
 
-    pkg = model_save.package_dict_save(data, context)
     admins = []
     if user:
-        admins = [model.User.by_name(user.decode('utf8'))]
+        user_obj = model.User.by_name(user.decode('utf8'))
+        if user_obj:
+            admins = [user_obj]
+            data['creator_user_id'] = user_obj.id
+
+    pkg = model_save.package_dict_save(data, context)
 
     model.setup_default_user_roles(pkg, admins)
     # Needed to let extensions know the package id
@@ -325,10 +334,12 @@ def related_create(context, data_dict):
     activity_create_context = {
         'model': model,
         'user': user,
-        'defer_commit':True,
+        'defer_commit': True,
+        'ignore_auth': True,
         'session': session
     }
-    activity_create(activity_create_context, activity_dict, ignore_auth=True)
+    logic.get_action('activity_create')(activity_create_context,
+                                        activity_dict)
     session.commit()
 
     context["related"] = related
@@ -440,6 +451,7 @@ def member_create(context, data_dict=None):
     if not obj:
         raise NotFound('%s was not found.' % obj_type.title())
 
+
     # User must be able to update the group to add a member to it
     _check_access('group_update', context, data_dict)
 
@@ -469,7 +481,9 @@ def _group_or_org_create(context, data_dict, is_org=False):
     parent = context.get('parent', None)
     data_dict['is_organization'] = is_org
 
-
+    upload = uploader.Upload('group')
+    upload.update_data_dict(data_dict, 'image_url',
+                           'image_upload', 'clear_upload')
     # get the schema
     group_plugin = lib_plugins.lookup_group_plugin(
             group_type=data_dict.get('type'))
@@ -548,12 +562,14 @@ def _group_or_org_create(context, data_dict, is_org=False):
     activity_create_context = {
         'model': model,
         'user': user,
-        'defer_commit':True,
+        'defer_commit': True,
+        'ignore_auth': True,
         'session': session
     }
     logic.get_action('activity_create')(activity_create_context,
-            activity_dict, ignore_auth=True)
+            activity_dict)
 
+    upload.upload()
     if not context.get('defer_commit'):
         model.repo.commit()
     context["group"] = group
@@ -700,6 +716,7 @@ def organization_create(context, data_dict):
     return _group_or_org_create(context, data_dict, is_org=True)
 
 
+@logic.auth_audit_exempt
 def rating_create(context, data_dict):
     '''Rate a dataset (package).
 
@@ -798,6 +815,7 @@ def user_create(context, data_dict):
         'model': model,
         'user': context['user'],
         'defer_commit': True,
+        'ignore_auth': True,
         'session': session
     }
     activity_dict = {
@@ -806,7 +824,7 @@ def user_create(context, data_dict):
             'activity_type': 'new user',
             }
     logic.get_action('activity_create')(activity_create_context,
-            activity_dict, ignore_auth=True)
+            activity_dict)
 
     if not context.get('defer_commit'):
         model.repo.commit()
@@ -822,8 +840,70 @@ def user_create(context, data_dict):
 
     context['user_obj'] = user
     context['id'] = user.id
-    log.debug('Created user %s' % user.name)
+
+    model.Dashboard.get(user.id) #  Create dashboard for user.
+
+    log.debug('Created user {name}'.format(name=user.name))
     return user_dict
+
+
+def user_invite(context, data_dict):
+    '''Invite a new user.
+
+    You must be authorized to create group members.
+
+    :param email: the email of the user to be invited to the group
+    :type email: string
+    :param group_id: the id or name of the group
+    :type group_id: string
+    :param role: role of the user in the group. One of ``member``, ``editor``,
+        or ``admin``
+    :type role: string
+
+    :returns: the newly created yser
+    :rtype: dictionary
+    '''
+    _check_access('user_invite', context, data_dict)
+
+    schema = context.get('schema',
+                         ckan.logic.schema.default_user_invite_schema())
+    data, errors = _validate(data_dict, schema, context)
+    if errors:
+        raise ValidationError(errors)
+
+    name = _get_random_username_from_email(data['email'])
+    password = str(random.SystemRandom().random())
+    data['name'] = name
+    data['password'] = password
+    data['state'] = ckan.model.State.PENDING
+    user_dict = _get_action('user_create')(context, data)
+    user = ckan.model.User.get(user_dict['id'])
+    member_dict = {
+        'username': user.id,
+        'id': data['group_id'],
+        'role': data['role']
+    }
+    _get_action('group_member_create')(context, member_dict)
+    mailer.send_invite(user)
+    return model_dictize.user_dictize(user, context)
+
+
+def _get_random_username_from_email(email):
+    localpart = email.split('@')[0]
+    cleaned_localpart = re.sub(r'[^\w]', '-', localpart)
+
+    # if we can't create a unique user name within this many attempts
+    # then something else is probably wrong and we should give up
+    max_name_creation_attempts = 100
+
+    for i in range(max_name_creation_attempts):
+        random_number = random.SystemRandom().random() * 10000
+        name = '%s-%d' % (cleaned_localpart, random_number)
+        if not ckan.model.User.get(name):
+            return name
+
+    return cleaned_localpart
+
 
 ## Modifications for rest api
 
@@ -892,7 +972,7 @@ def vocabulary_create(context, data_dict):
 
     return model_dictize.vocabulary_dictize(vocabulary, context)
 
-def activity_create(context, activity_dict, ignore_auth=False):
+def activity_create(context, activity_dict, **kw):
     '''Create a new activity stream activity.
 
     You must be a sysadmin to create new activities.
@@ -914,6 +994,14 @@ def activity_create(context, activity_dict, ignore_auth=False):
     :rtype: dictionary
 
     '''
+
+    # this action had a ignore_auth param which has been removed
+    # removed in 2.2
+    if 'ignore_auth' in kw:
+        raise Exception('Activity Stream calling parameters have changed '
+                        'ignore_auth must be passed in the context not as '
+                        'a param')
+
     if not paste.deploy.converters.asbool(
             config.get('ckan.activity_streams_enabled', 'true')):
         return
@@ -927,8 +1015,7 @@ def activity_create(context, activity_dict, ignore_auth=False):
     else:
         activity_dict['revision_id'] = None
 
-    if not ignore_auth:
-        _check_access('activity_create', context, activity_dict)
+    _check_access('activity_create', context, activity_dict)
 
     schema = context.get('schema') or ckan.logic.schema.default_create_activity_schema()
     data, errors = _validate(activity_dict, schema, context)
@@ -955,7 +1042,7 @@ def package_relationship_create_rest(context, data_dict):
     relationship_dict = _get_action('package_relationship_create')(context, data_dict)
     return relationship_dict
 
-def tag_create(context, tag_dict):
+def tag_create(context, data_dict):
     '''Create a new vocabulary tag.
 
     You must be a sysadmin to create vocabulary tags.
@@ -978,14 +1065,14 @@ def tag_create(context, tag_dict):
     '''
     model = context['model']
 
-    _check_access('tag_create', context, tag_dict)
+    _check_access('tag_create', context, data_dict)
 
     schema = context.get('schema') or ckan.logic.schema.default_create_tag_schema()
-    data, errors = _validate(tag_dict, schema, context)
+    data, errors = _validate(data_dict, schema, context)
     if errors:
         raise ValidationError(errors)
 
-    tag = model_save.tag_dict_save(tag_dict, context)
+    tag = model_save.tag_dict_save(data_dict, context)
 
     if not context.get('defer_commit'):
         model.repo.commit()
@@ -1122,7 +1209,7 @@ def _group_or_org_member_create(context, data_dict, is_org=False):
     role = data_dict.get('role')
     group_id = data_dict.get('id')
     group = model.Group.get(group_id)
-    result = session.query(model.User).filter_by(name=username).first()
+    result = model.User.get(username)
     if result:
         user_id = result.id
     else:
