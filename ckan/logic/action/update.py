@@ -230,7 +230,7 @@ def resource_update(context, data_dict):
         pkg_dict = _get_action('package_update')(context, pkg_dict)
         context.pop('defer_commit')
     except ValidationError, e:
-        errors = e.error_dict['resources'][n]
+        errors = e.error_summary  # sometimes the error is not about the resource --> take summary of all errors
         raise ValidationError(errors)
 
     upload.upload(id, uploader.get_max_resource_size())
