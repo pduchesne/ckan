@@ -224,7 +224,7 @@ def resource_update(context, data_dict):
     try:
         pkg_dict = _get_action('package_update')(context, pkg_dict)
     except ValidationError, e:
-        errors = e.error_dict['resources'][n]
+        errors = e.error_summary  # sometimes the error is not about the resource --> take summary of all errors
         raise ValidationError(errors)
 
     return pkg_dict['resources'][n]
