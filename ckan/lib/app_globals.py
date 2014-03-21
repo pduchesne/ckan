@@ -27,6 +27,7 @@ auto_update = [
     'ckan.site_url',
     'ckan.site_description',
     'ckan.site_about',
+    'ckan.site_its_doc',
     'ckan.site_intro_text',
     'ckan.site_custom_css',
 ]

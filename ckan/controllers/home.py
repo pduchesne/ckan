@@ -185,6 +185,9 @@ class HomeController(base.BaseController):
     def about(self):
         return base.render('home/about.html')
 
+    def its_doc(self):
+        return base.render('home/its_doc.html')
+
     def cache(self, id):
         '''Manual way to clear the caches'''
         if id == 'clear':
