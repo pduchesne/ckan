@@ -1,0 +1,24 @@
+{% extends "page.html" %}
+
+{% block subtitle %}{{ _('Documentation') }}{% endblock %}
+
+{% block breadcrumb_content %}
+  <li class="active">{% link_for _('Documentation'), controller='home', action='its_doc' %}</li>
+{% endblock %}
+
+{% block primary %}
+  <article class="module">
+    <div class="module-content">
+      {% block its_doc %}
+        {% if g.site_its_doc %}
+          {{ h.render_markdown(g.site_its_doc) }}
+        {% else %}
+          <h1 class="page-heading">{{ _('Documentation') }}</h1>
+          {#% snippet 'home/snippets/about_text.html' TODO put default text? %#}
+        {% endif %}
+      {% endblock %}
+    </div>
+  </article>
+{% endblock %}
+
+{% block secondary %}{% endblock %}
