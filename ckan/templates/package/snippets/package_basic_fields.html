@@ -31,7 +31,7 @@
   <label class="control-label" for="field-license">{{ _("License") }}</label>
   <div class="controls">
     <select id="field-license" name="license_id" data-module="autocomplete">
-      {% for licence_desc, licence_id in licences|sort if licence_desc  %}
+      {% for licence_desc, licence_id, license_status in licences|sort if (licence_desc and (license_status == 'active' or not license_status)) %}
         <option value="{{ licence_id }}" {% if data.get('license_id', 'notspecified') == licence_id %}selected="selected"{% endif %}>{{ licence_desc }}</option>
       {% endfor %}
     </select>

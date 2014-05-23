@@ -190,7 +190,7 @@ class DefaultDatasetForm(object):
 
         c.groups_available = authz_fn(context, data_dict)
 
-        c.licences = [('', '')] + base.model.Package.get_license_options()
+        c.licences = [('', '', '')] + base.model.Package.get_license_options()
         c.is_sysadmin = ckan.new_authz.is_sysadmin(c.user)
 
         if c.pkg:

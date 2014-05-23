@@ -345,7 +345,7 @@ class Package(vdm.sqlalchemy.RevisionedObjectMixin,
     @classmethod
     def get_license_options(cls):
         register = cls.get_license_register()
-        return [(l.title, l.id) for l in register.values()]
+        return [(l.title, l.id, l.status) for l in register.values()]
 
     def get_license(self):
         if self.license_id:
