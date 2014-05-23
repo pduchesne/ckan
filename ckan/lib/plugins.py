@@ -229,7 +229,7 @@ class DefaultDatasetForm(object):
 
         c.groups_available = authz_fn(context, data_dict)
 
-        c.licenses = [('', '')] + base.model.Package.get_license_options()
+        c.licences = [('', '', '')] + base.model.Package.get_license_options()
         # CS: bad_spelling ignore 2 lines
         c.licences = c.licenses
         maintain.deprecate_context_item('licences', 'Use `c.licenses` instead')
