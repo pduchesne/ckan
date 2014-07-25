@@ -22,7 +22,7 @@
   ],
   "Edit": [
     null,
-    "Bijwerk"
+    "Bewerk"
   ],
   "Failed to load data API information": [
     null,
