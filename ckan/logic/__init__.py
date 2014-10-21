@@ -16,6 +16,10 @@ log = logging.getLogger(__name__)
 _validate = df.validate
 
 
+class NameConflict(Exception):
+    pass
+
+
 class AttributeDict(dict):
     def __getattr__(self, name):
         try:
@@ -94,11 +98,17 @@ class ValidationError(ActionError):
                 return _(field_name.replace('_', ' '))
 
             summary = {}
+
             for key, error in error_dict.iteritems():
                 if key == 'resources':
                     summary[_('Resources')] = _('Package resource(s) invalid')
                 elif key == 'extras':
-                    summary[_('Extras')] = _('Missing Value')
+                    errors_extras = []
+                    for item in error:
+                        if (item.get('key')
+                                and item['key'][0] not in errors_extras):
+                            errors_extras.append(item.get('key')[0])
+                    summary[_('Extras')] = ', '.join(errors_extras)
                 elif key == 'extras_validation':
                     summary[_('Extras')] = error[0]
                 elif key == 'tags':
@@ -259,7 +269,6 @@ def check_access(action, context, data_dict=None):
         authorized to call the named action
 
     '''
-    action = new_authz.clean_action_name(action)
 
     # Auth Auditing.  We remove this call from the __auth_audit stack to show
     # we have called the auth function
@@ -341,8 +350,6 @@ def get_action(action):
     :rtype: callable
 
     '''
-    # clean the action names
-    action = new_authz.clean_action_name(action)
 
     if _actions:
         if not action in _actions:
@@ -365,7 +372,6 @@ def get_action(action):
                 if (hasattr(v, '__call__')
                         and (v.__module__ == module_path
                              or hasattr(v, '__replaced'))):
-                    k = new_authz.clean_action_name(k)
                     _actions[k] = v
 
                     # Whitelist all actions defined in logic/action/get.py as
@@ -380,15 +386,14 @@ def get_action(action):
     fetched_actions = {}
     for plugin in p.PluginImplementations(p.IActions):
         for name, auth_function in plugin.get_actions().items():
-            name = new_authz.clean_action_name(name)
             if name in resolved_action_plugins:
-                raise Exception(
+                raise NameConflict(
                     'The action %r is already implemented in %r' % (
                         name,
                         resolved_action_plugins[name]
                     )
                 )
-            log.debug('Auth function %r was inserted', plugin.name)
+            log.debug('Action function {0} from plugin {1} was inserted'.format(name, plugin.name))
             resolved_action_plugins[name] = plugin.name
             # Extensions are exempted from the auth audit for now
             # This needs to be resolved later
@@ -402,7 +407,7 @@ def get_action(action):
         def make_wrapped(_action, action_name):
             def wrapped(context=None, data_dict=None, **kw):
                 if kw:
-                    log.critical('%s was pass extra keywords %r'
+                    log.critical('%s was passed extra keywords %r'
                                  % (_action.__name__, kw))
 
                 context = _prepopulate_context(context)
@@ -423,7 +428,9 @@ def get_action(action):
                         if action_name not in new_authz.auth_functions_list():
                             log.debug('No auth function for %s' % action_name)
                         elif not getattr(_action, 'auth_audit_exempt', False):
-                            raise Exception('Action Auth Audit: %s' % action_name)
+                            raise Exception(
+                                'Action function {0} did not call its auth function'
+                                .format(action_name))
                         # remove from audit stack
                         context['__auth_audit'].pop()
                 except IndexError:
@@ -444,22 +451,6 @@ def get_action(action):
         if getattr(_action, 'side_effect_free', False):
             fn.side_effect_free = True
         _actions[action_name] = fn
-
-
-        def replaced_action(action_name):
-            def warn(context, data_dict):
-                log.critical('Action `%s` is being called directly '
-                             'all action calls should be accessed via '
-                             'logic.get_action' % action_name)
-                return get_action(action_name)(context, data_dict)
-            return warn
-
-        # Store our wrapped function so it is available.  This is to prevent
-        # rewrapping of actions
-        module = sys.modules[_action.__module__]
-        r = replaced_action(action_name)
-        r.__replaced = fn
-        module.__dict__[action_name] = r
 
     return _actions.get(action)
 
@@ -502,13 +493,30 @@ def get_or_bust(data_dict, keys):
         return values[0]
     return tuple(values)
 
+def validate(schema_func, can_skip_validator=False):
+    ''' A decorator that validates an action function against a given schema
+    '''
+    def action_decorator(action):
+        @functools.wraps(action)
+        def wrapper(context, data_dict):
+            if can_skip_validator:
+                if context.get('skip_validation'):
+                    return action(context, data_dict)
+
+            schema = context.get('schema', schema_func())
+            data_dict, errors = _validate(data_dict, schema, context)
+            if errors:
+                raise ValidationError(errors)
+            return action(context, data_dict)
+        return wrapper
+    return action_decorator
 
 def side_effect_free(action):
     '''A decorator that marks the given action function as side-effect-free.
 
     Action functions decorated with this decorator can be called with an HTTP
-    GET request to the :doc:`Action API </api>`. Action functions that don't
-    have this decorator must be called with a POST request.
+    GET request to the :doc:`Action API </api/index>`. Action functions that
+    don't have this decorator must be called with a POST request.
 
     If your CKAN extension defines its own action functions using the
     :py:class:`~ckan.plugins.interfaces.IActions` plugin interface, you can use
@@ -540,9 +548,9 @@ def auth_sysadmins_check(action):
     to call an action function.
 
     Normally sysadmins are allowed to call any action function (for example
-    when they're using the :doc:`Action API </api>` or the web interface),
-    if the user is a sysadmin the action function's authorization function
-    will not even be called.
+    when they're using the :doc:`Action API </api/index>` or the web
+    interface), if the user is a sysadmin the action function's authorization
+    function will not even be called.
 
     If an action function is decorated with this decorator, then its
     authorization function will always be called, even if the user is a
@@ -626,48 +634,21 @@ def get_validator(validator):
         validators = _import_module_functions('ckan.logic.validators')
         _validators_cache.update(validators)
         _validators_cache.update({'OneOf': formencode.validators.OneOf})
+        converters = _import_module_functions('ckan.logic.converters')
+        _validators_cache.update(converters)
+
+        for plugin in p.PluginImplementations(p.IValidators):
+            for name, fn in plugin.get_validators().items():
+                if name in _validators_cache:
+                    raise NameConflict(
+                        'The validator %r is already defined' % (name,)
+                    )
+                log.debug('Validator function {0} from plugin {1} was inserted'.format(name, plugin.name))
+                _validators_cache[name] = fn
     try:
         return _validators_cache[validator]
     except KeyError:
         raise UnknownValidator('Validator `%s` does not exist' % validator)
-
-
-class UnknownConverter(Exception):
-    '''Exception raised when a requested converter function cannot be found.
-
-    '''
-    pass
-
-
-_converters_cache = {}
-
-def clear_converters_cache():
-    _converters_cache.clear()
-
-
-# This function exists mainly so that converters can be made available to
-# extensions via ckan.plugins.toolkit.
-def get_converter(converter):
-    '''Return a converter function by name.
-
-    :param converter: the name of the converter function to return,
-        eg. ``'convert_to_extras'``
-    :type converter: string
-
-    :raises: :py:exc:`~ckan.plugins.toolkit.UnknownConverter` if the named
-        converter is not found
-
-    :returns: the named converter function
-    :rtype: ``types.FunctionType``
-
-    '''
-    if not _converters_cache:
-        converters = _import_module_functions('ckan.logic.converters')
-        _converters_cache.update(converters)
-    try:
-        return _converters_cache[converter]
-    except KeyError:
-        raise UnknownConverter('Converter `%s` does not exist' % converter)
 
 
 def model_name_to_class(model_module, model_name):

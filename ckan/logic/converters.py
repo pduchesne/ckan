@@ -1,3 +1,5 @@
+import json
+
 import ckan.model as model
 import ckan.lib.navl.dictization_functions as df
 import ckan.lib.field_types as field_types
@@ -5,11 +7,18 @@ import ckan.logic.validators as validators
 
 from ckan.common import _
 
+
 def convert_to_extras(key, data, errors, context):
-    extras = data.get(('extras',), [])
-    if not extras:
-        data[('extras',)] = extras
-    extras.append({'key': key[-1], 'value': data[key]})
+
+    # Get the current extras index
+    current_indexes = [k[1] for k in data.keys()
+                       if len(k) > 1 and k[0] == 'extras']
+
+    new_index = max(current_indexes) + 1 if current_indexes else 0
+
+    data[('extras', new_index, 'key')] = key[-1]
+    data[('extras', new_index, 'value')] = data[key]
+
 
 def convert_from_extras(key, data, errors, context):
 
@@ -31,6 +40,11 @@ def convert_from_extras(key, data, errors, context):
     else:
         return
     remove_from_extras(data, data_key[1])
+
+def extras_unicode_convert(extras, context):
+    for extra in extras:
+        extras[extra] = unicode(extras[extra])
+    return extras
 
 def date_to_db(value, context):
     try:
@@ -169,3 +183,19 @@ def convert_group_name_or_id_to_id(group_name_or_id, context):
     if not result:
         raise df.Invalid('%s: %s' % (_('Not found'), _('Group')))
     return result.id
+
+
+def convert_to_json_if_string(value, context):
+    if isinstance(value, basestring):
+        try:
+            return json.loads(value)
+        except ValueError:
+            raise df.Invalid(_('Could not parse as valid JSON'))
+    else:
+        return value
+
+
+def remove_whitespace(value, context):
+    if isinstance(value, basestring):
+        return value.strip()
+    return value

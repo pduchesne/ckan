@@ -6,9 +6,12 @@ import datetime
 import sys
 from pprint import pprint
 import re
+import ckan.logic as logic
+import ckan.model as model
 import ckan.include.rjsmin as rjsmin
 import ckan.include.rcssmin as rcssmin
 import ckan.lib.fanstatic_resources as fanstatic_resources
+import ckan.plugins as p
 import sqlalchemy as sa
 import urlparse
 import routes
@@ -48,6 +51,41 @@ def parse_db_config(config_key='sqlalchemy.url'):
         raise Exception('Could not extract db details from url: %r' % url)
     db_details = db_details_match.groupdict()
     return db_details
+
+
+## from http://code.activestate.com/recipes/577058/ MIT licence.
+## Written by Trent Mick
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is one of "yes" or "no".
+    """
+    valid = {"yes":"yes",   "y":"yes",  "ye":"yes",
+             "no":"no",     "n":"no"}
+    if default == None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while 1:
+        sys.stdout.write(question + prompt)
+        choice = raw_input().lower()
+        if default is not None and choice == '':
+            return default
+        elif choice in valid.keys():
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "\
+                             "(or 'y' or 'n').\n")
 
 
 class MockTranslator(object):
@@ -101,6 +139,19 @@ class CkanCommand(paste.script.command.Command):
         self.translator_obj = MockTranslator()
         self.registry.register(pylons.translator, self.translator_obj)
 
+        if model.user_table.exists():
+            # If the DB has already been initialized, create and register
+            # a pylons context object, and add the site user to it, so the
+            # auth works as in a normal web request
+            c = pylons.util.AttribSafeContextObj()
+
+            self.registry.register(pylons.c, c)
+
+            self.site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
+
+            pylons.c.user = self.site_user['name']
+            pylons.c.userobj = model.User.get(self.site_user['name'])
+
         ## give routes enough information to run url_for
         parsed = urlparse.urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))
         request_config = routes.request_config()
@@ -130,6 +181,7 @@ class ManageDb(CkanCommand):
     db load-only FILE_PATH         - load a pg_dump from a file but don\'t do
                                      the schema upgrade or search indexing
     db create-from-model           - create database from the model (indexes not made)
+    db migrate-filestore           - migrate all uploaded data from the 2.1 filesore.
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
@@ -143,6 +195,7 @@ class ManageDb(CkanCommand):
 
         cmd = self.args[0]
         if cmd == 'init':
+
             model.repo.init_db()
             if self.verbose:
                 print 'Initialising DB: SUCCESS'
@@ -187,6 +240,8 @@ class ManageDb(CkanCommand):
                 print 'Creating DB: SUCCESS'
         elif cmd == 'send-rdf':
             self.send_rdf()
+        elif cmd == 'migrate-filestore':
+            self.migrate_filestore()
         else:
             print 'Command %s not recognized' % cmd
             sys.exit(1)
@@ -319,6 +374,45 @@ class ManageDb(CkanCommand):
         talis = ckan.lib.talis.Talis()
         return talis.send_rdf(talis_store, username, password)
 
+    def migrate_filestore(self):
+        from ckan.model import Session
+        import requests
+        from ckan.lib.uploader import ResourceUpload
+        results = Session.execute("select id, revision_id, url from resource "
+                                  "where resource_type = 'file.upload' "
+                                  "and (url_type <> 'upload' or url_type is null)"
+                                  "and url like '%storage%'")
+        for id, revision_id, url  in results:
+            response = requests.get(url, stream=True)
+            if response.status_code != 200:
+                print "failed to fetch %s (code %s)" % (url,
+                                                        response.status_code)
+                continue
+            resource_upload = ResourceUpload({'id': id})
+            assert resource_upload.storage_path, "no storage configured aborting"
+
+            directory = resource_upload.get_directory(id)
+            filepath = resource_upload.get_path(id)
+            try:
+                os.makedirs(directory)
+            except OSError, e:
+                ## errno 17 is file already exists
+                if e.errno != 17:
+                    raise
+
+            with open(filepath, 'wb+') as out:
+                for chunk in response.iter_content(1024):
+                    if chunk:
+                        out.write(chunk)
+
+            Session.execute("update resource set url_type = 'upload'"
+                            "where id = '%s'"  % id)
+            Session.execute("update resource_revision set url_type = 'upload'"
+                            "where id = '%s' and "
+                            "revision_id = '%s'" % (id, revision_id))
+            Session.commit()
+            print "Saved url %s" % url
+
     def version(self):
         from ckan.model import Session
         print Session.execute('select version from migrate_version;').fetchall()
@@ -331,7 +425,7 @@ class SearchIndexCommand(CkanCommand):
     Usage:
       search-index [-i] [-o] [-r] [-e] rebuild [dataset_name]  - reindex dataset_name if given, if not then rebuild
                                                                  full search index (all datasets)
-      search-index rebuild_fast                                - reindex using multiprocessing using all cores. 
+      search-index rebuild_fast                                - reindex using multiprocessing using all cores.
                                                                  This acts in the same way as rubuild -r [EXPERIMENTAL]
       search-index check                                       - checks for datasets not indexed
       search-index show DATASET_NAME                           - shows index of a dataset
@@ -655,7 +749,7 @@ class UserCmd(CkanCommand):
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
-    max_args = 4
+    max_args = None
     min_args = 0
 
     def command(self):
@@ -688,7 +782,7 @@ class UserCmd(CkanCommand):
     def list(self):
         import ckan.model as model
         print 'Users:'
-        users = model.Session.query(model.User)
+        users = model.Session.query(model.User).filter_by(state = 'active')
         print 'count = %i' % users.count()
         for user in users:
             print self.get_user_str(user)
@@ -1046,6 +1140,7 @@ class Tracking(CkanCommand):
                 start_date = combine(start_date, datetime.time(0))
             else:
                 start_date = datetime.datetime(2011, 1, 1)
+        start_date_solrsync = start_date
         end_date = datetime.datetime.now()
 
         while start_date < end_date:
@@ -1053,6 +1148,8 @@ class Tracking(CkanCommand):
             self.update_tracking(engine, start_date)
             print 'tracking updated for %s' % start_date
             start_date = stop_date
+
+        self.update_tracking_solr(engine, start_date_solrsync)
 
     def _total_views(self, engine):
         sql = '''
@@ -1105,7 +1202,7 @@ class Tracking(CkanCommand):
                               for r in total_views])
 
     def update_tracking(self, engine, summary_date):
-        PACKAGE_URL = '%/dataset/'
+        PACKAGE_URL = '/dataset/'
         # clear out existing data before adding new
         sql = '''DELETE FROM tracking_summary
                  WHERE tracking_date='%s'; ''' % summary_date
@@ -1131,7 +1228,7 @@ class Tracking(CkanCommand):
         sql = '''UPDATE tracking_summary t
                  SET package_id = COALESCE(
                         (SELECT id FROM package p
-                        WHERE t.url LIKE  %s || p.name)
+                        WHERE p.name = regexp_replace(' ' || t.url, '^[ ]{1}(/\w{2}){0,1}' || %s, ''))
                      ,'~~not~found~~')
                  WHERE t.package_id IS NULL
                  AND tracking_type = 'page';'''
@@ -1172,6 +1269,34 @@ class Tracking(CkanCommand):
                  AND t1.package_id IS NOT NULL
                  AND t1.package_id != '~~not~found~~';'''
         engine.execute(sql)
+
+    def update_tracking_solr(self, engine, start_date):
+        sql = '''SELECT package_id FROM tracking_summary
+                where package_id!='~~not~found~~'
+                and tracking_date >= %s;'''
+        results = engine.execute(sql, start_date)
+
+        package_ids = set()
+        for row in results:
+            package_ids.add(row['package_id'])
+
+        total = len(package_ids)
+        not_found = 0
+        print '%i package index%s to be rebuilt starting from %s' % (total, '' if total < 2 else 'es', start_date)
+
+        from ckan.lib.search import rebuild
+        for package_id in package_ids:
+            try:
+                rebuild(package_id)
+            except logic.NotFound:
+                print "Error: package %s not found." % (package_id)
+                not_found += 1
+            except KeyboardInterrupt:
+                print "Stopped."
+                return
+            except:
+                raise
+        print 'search index rebuilding done.' + (' %i not found.' % (not_found) if not_found else "")
 
 class PluginInfo(CkanCommand):
     '''Provide info on installed plugins.
@@ -1280,7 +1405,7 @@ class CreateTestDataCommand(CkanCommand):
                                     translations of terms
     create-test-data vocabs       - annakerenina, warandpeace, and some test
                                     vocabularies
-
+    create-test-data hierarchy    - hierarchy of groups
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
@@ -1290,6 +1415,7 @@ class CreateTestDataCommand(CkanCommand):
     def command(self):
         self._load_config()
         self._setup_app()
+        from ckan import plugins
         from create_test_data import CreateTestData
 
         if self.args:
@@ -1314,6 +1440,8 @@ class CreateTestDataCommand(CkanCommand):
             CreateTestData.create_translations_test_data()
         elif cmd == 'vocabs':
             CreateTestData.create_vocabs_test_data()
+        elif cmd == 'hierarchy':
+            CreateTestData.create_group_hierarchy_test_data()
         else:
             print 'Command %s not recognized' % cmd
             raise NotImplementedError
@@ -2012,3 +2140,286 @@ class FrontEndBuildCommand(CkanCommand):
         ckanext = os.path.abspath(ckanext)
         cmd.args = (root, ckanext)
         cmd.command()
+
+class ViewsCommand(CkanCommand):
+    '''Manage resource views.
+
+    Usage:
+
+        paster views create all                 - Create views for all types.
+        paster views create [type1] [type2] ... - Create views for specified types.
+        paster views clean                      - Permanently delete views for all types no longer in the configuration file.
+
+    Supported types are "pdf", "text", "webpage", "image" and "grid".  Make
+    sure the relevant plugins are loaded for the following types, otherwise
+    an error will be raised:
+        * "grid"-> "recline_grid_view"
+        * "pdf" -> "pdf_view"
+        * "text -> "text_view"
+    '''
+
+    summary = __doc__.split('\n')[0]
+    usage = __doc__
+    min_args = 1
+
+    def command(self):
+        self._load_config()
+        if not self.args:
+            print self.usage
+        elif self.args[0] == 'create':
+            self.create_views(self.args[1:])
+        elif self.args[0] == 'clean':
+            self.clean_views()
+        else:
+            print self.usage
+
+    def create_views(self, view_types):
+        supported_types = ['grid', 'text', 'webpage', 'pdf', 'image']
+        if not view_types:
+            print self.usage
+            return
+        if view_types[0] == 'all':
+            view_types = supported_types
+        else:
+            for view_type in view_types:
+                if view_type not in supported_types:
+                    print 'View type {view} not supported in this command'.format(view=view_type)
+                    return
+
+        for view_type in view_types:
+            create_function_name = 'create_%s_views' % view_type
+            create_function = getattr(self, create_function_name)
+            create_function()
+
+    def clean_views(self):
+        names = []
+        for plugin in p.PluginImplementations(p.IResourceView):
+            names.append(str(plugin.info()['name']))
+
+        results = model.ResourceView.get_count_not_in_view_types(names)
+
+        if not results:
+            print 'No resource views to delete'
+            return
+
+        print 'This command will delete.\n'
+        for row in results:
+            print '%s of type %s' % (row[1], row[0])
+
+        result = query_yes_no('Do you want to delete these resource views:', default='no')
+
+        if result == 'no':
+            print 'Not Deleting.'
+            return
+
+        model.ResourceView.delete_not_in_view_types(names)
+        model.Session.commit()
+        print 'Deleted resource views.'
+
+    def create_text_views(self):
+        if not p.plugin_loaded('text_view'):
+            print 'Please enable the text_view plugin to make the text views.'
+            return
+
+        if not p.plugin_loaded('resource_proxy'):
+            print 'Please enable the resource_proxy plugin to make the text views.'
+            return
+
+        print 'Text resource views are being created'
+
+        import ckanext.textview.plugin as textplugin
+
+        formats = tuple(textplugin.DEFAULT_TEXT_FORMATS + textplugin.DEFAULT_XML_FORMATS +
+                        textplugin.DEFAULT_JSON_FORMATS + textplugin.DEFAULT_JSONP_FORMATS)
+
+        resources = model.Resource.get_all_without_views(formats)
+
+        user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+        context = {'model': model, 'session': model.Session, 'user': user['name']}
+
+        count = 0
+        for resource in resources:
+            count += 1
+            resource_view = {'title': 'Text View',
+                             'description': 'View of the {format} file'.format(
+                              format=resource.format.upper()),
+                             'resource_id': resource.id,
+                             'view_type': 'text'}
+
+            logic.get_action('resource_view_create')(context, resource_view)
+
+        print '%s text resource views created!' % count
+
+
+    def create_image_views(self):
+        import ckanext.imageview.plugin as imagevewplugin
+        formats = tuple(imagevewplugin.DEFAULT_IMAGE_FORMATS)
+
+        print 'Image resource views are being created'
+
+        resources = model.Resource.get_all_without_views(formats)
+
+        user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+        context = {'model': model, 'session': model.Session, 'user': user['name']}
+
+        count = 0
+        for resource in resources:
+            count += 1
+            resource_view = {'title': 'Resource Image',
+                             'description': 'View of the Image',
+                             'resource_id': resource.id,
+                             'view_type': 'image'}
+
+            logic.get_action('resource_view_create')(context, resource_view)
+
+        print '%s image resource views created!' % count
+
+    def create_webpage_views(self):
+        formats = tuple(['html', 'htm'])
+
+        print 'Web page resource views are being created'
+
+        resources = model.Resource.get_all_without_views(formats)
+
+        user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+        context = {'model': model, 'session': model.Session, 'user': user['name']}
+
+        count = 0
+        for resource in resources:
+            count += 1
+            resource_view = {'title': 'Web Page View',
+                             'description': 'View of the webpage',
+                             'resource_id': resource.id,
+                             'view_type': 'webpage'}
+
+            logic.get_action('resource_view_create')(context, resource_view)
+
+        print '%s webpage resource views created!' % count
+
+    def create_pdf_views(self):
+        if not p.plugin_loaded('pdf_view'):
+            print 'Please enable the pdf_view plugin to make the PDF views.'
+            return
+
+        if not p.plugin_loaded('resource_proxy'):
+            print 'Please enable the resource_proxy plugin to make the PDF views.'
+            return
+
+        print 'PDF resource views are being created'
+
+        resources = model.Resource.get_all_without_views(['pdf'])
+
+        user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+        context = {'model': model, 'session': model.Session, 'user': user['name']}
+
+        count = 0
+        for resource in resources:
+            count += 1
+            resource_view = {'title': 'PDF View',
+                             'description': 'PDF view of the resource.',
+                             'resource_id': resource.id,
+                             'view_type': 'pdf'}
+
+            logic.get_action('resource_view_create')(context, resource_view)
+
+        print '%s pdf resource views created!' % count
+
+    def create_grid_views(self):
+        import ckan.plugins.toolkit as toolkit
+        import ckanext.datastore.db as db
+        import pylons
+
+        if not p.plugin_loaded('datastore'):
+            print 'The datastore plugin needs to be enabled to generate the grid views.'
+            return
+
+        if not p.plugin_loaded('recline_grid_view'):
+            print 'Please enable the recline_grid_view plugin to make the grid views.'
+            return
+
+        print 'Grid resource views are being created'
+
+        user = logic.get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+        context = {'model': model, 'session': model.Session, 'user': user['name']}
+
+        data_dict = {}
+        data_dict['connection_url'] = pylons.config['ckan.datastore.write_url']
+
+        resources_sql = sa.text(u'''SELECT name FROM "_table_metadata"
+                                    WHERE alias_of is null''')
+        results = db._get_engine(data_dict).execute(resources_sql)
+
+        count = 0
+        for row in results:
+            try:
+                res = logic.get_action('resource_view_list')(context, {'id': row[0]})
+            except toolkit.ObjectNotFound:
+                continue
+            if res:
+                continue
+            count += 1
+            resource_view = {'resource_id': row[0],
+                             'view_type': 'recline_grid_view',
+                             'title': 'Grid view',
+                             'description': 'View of data within the DataStore'}
+            logic.get_action('resource_view_create')(context, resource_view)
+
+        print '%s grid resource views created!' % count
+
+
+class ConfigToolCommand(paste.script.command.Command):
+    '''Tool for editing options in a CKAN config file
+
+    paster config-tool <default.ini> <key>=<value> [<key>=<value> ...]
+    paster config-tool <default.ini> -f <custom_options.ini>
+
+    Examples:
+      paster config-tool default.ini sqlalchemy.url=123 'ckan.site_title=ABC'
+      paster config-tool default.ini -s server:main -e port=8080
+      paster config-tool default.ini -f custom_options.ini
+    '''
+    parser = paste.script.command.Command.standard_parser(verbose=True)
+    default_verbosity = 1
+    group_name = 'ckan'
+    usage = __doc__
+    summary = usage.split('\n')[0]
+
+    parser.add_option('-s', '--section', dest='section',
+                      default='app:main', help='Section of the config file')
+    parser.add_option(
+        '-e', '--edit', action='store_true', dest='edit', default=False,
+        help='Checks the option already exists in the config file')
+    parser.add_option(
+        '-f', '--file', dest='merge_filepath', metavar='FILE',
+        help='Supply an options file to merge in')
+
+    def command(self):
+        import config_tool
+        if len(self.args) < 1:
+            self.parser.error('Not enough arguments (got %i, need at least 1)'
+                              % len(self.args))
+        config_filepath = self.args[0]
+        if not os.path.exists(config_filepath):
+            self.parser.error('Config filename %r does not exist.' %
+                              config_filepath)
+        if self.options.merge_filepath:
+            config_tool.config_edit_using_merge_file(
+                config_filepath, self.options.merge_filepath)
+        options = self.args[1:]
+        if not (options or self.options.merge_filepath):
+            self.parser.error('No options provided')
+        if options:
+            for option in options:
+                if '=' not in option:
+                    sys.stderr.write(
+                        'An option does not have an equals sign: %r '
+                        'It should be \'key=value\'. If there are spaces '
+                        'you\'ll need to quote the option.\n' % option)
+                    sys.exit(1)
+            try:
+                config_tool.config_edit_using_option_strings(
+                    config_filepath, options, self.options.section,
+                    edit=self.options.edit)
+            except config_tool.ConfigToolError, e:
+                sys.stderr.write(e.message)
+                sys.exit(1)

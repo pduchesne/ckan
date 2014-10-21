@@ -1,5 +1,6 @@
 import ckan.logic as logic
 import ckan.new_authz as new_authz
+import ckan.logic.auth as logic_auth
 
 from ckan.common import _
 
@@ -8,11 +9,17 @@ def package_create(context, data_dict=None):
     user = context['user']
 
     if new_authz.auth_is_anon_user(context):
-        check1 = new_authz.check_config_permission('anon_create_dataset')
+        check1 = all(new_authz.check_config_permission(p) for p in (
+            'anon_create_dataset',
+            'create_dataset_if_not_in_organization',
+            'create_unowned_dataset',
+            ))
     else:
-        check1 = new_authz.check_config_permission('create_dataset_if_not_in_organization') \
-            or new_authz.check_config_permission('create_unowned_dataset') \
-            or new_authz.has_user_permission_for_some_org(user, 'create_dataset')
+        check1 = all(new_authz.check_config_permission(p) for p in (
+            'create_dataset_if_not_in_organization',
+            'create_unowned_dataset',
+            )) or new_authz.has_user_permission_for_some_org(
+            user, 'create_dataset')
 
     if not check1:
         return {'success': False, 'msg': _('User %s not authorized to create packages') % user}
@@ -54,6 +61,7 @@ def related_create(context, data_dict=None):
 
     return {'success': False, 'msg': _('You must be logged in to add a related item')}
 
+
 def resource_create(context, data_dict):
     # resource_create runs through package_update, no need to
     # check users eligibility to add resource to package here.
@@ -62,6 +70,11 @@ def resource_create(context, data_dict):
     # should be using package_update permissions and have better errors.  I
     # am also not sure about the need for the group issue
     return new_authz.is_authorized('package_create', context, data_dict)
+
+
+def resource_view_create(context, data_dict):
+    return resource_create(context, data_dict)
+
 
 def package_relationship_create(context, data_dict):
     user = context['user']
@@ -120,11 +133,19 @@ def user_create(context, data_dict=None):
             'create users')}
     return {'success': True}
 
-def user_invite(context, data_dict=None):
-    context['id'] = context.get('group_id')
+def user_invite(context, data_dict):
+    data_dict['id'] = data_dict['group_id']
     return group_member_create(context, data_dict)
 
 def _check_group_auth(context, data_dict):
+    '''Has this user got update permission for all of the given groups?
+    If there is a package in the context then ignore that package's groups.
+    (owner_org is checked elsewhere.)
+    :returns: False if not allowed to update one (or more) of the given groups.
+              True otherwise. i.e. True is the default. A blank data_dict
+              mentions no groups, so it returns True.
+
+    '''
     # FIXME This code is shared amoung other logic.auth files and should be
     # somewhere better
     if not data_dict:
@@ -136,7 +157,7 @@ def _check_group_auth(context, data_dict):
 
     api_version = context.get('api_version') or '1'
 
-    group_blobs = data_dict.get("groups", [])
+    group_blobs = data_dict.get('groups', [])
     groups = set()
     for group_blob in group_blobs:
         # group_blob might be a dict or a group_ref
@@ -207,3 +228,23 @@ def organization_member_create(context, data_dict):
 
 def group_member_create(context, data_dict):
     return _group_or_org_member_create(context, data_dict)
+
+def member_create(context, data_dict):
+    group = logic_auth.get_group_object(context, data_dict)
+    user = context['user']
+
+    # User must be able to update the group to add a member to it
+    permission = 'update'
+    # However if the user is member of group then they can add/remove datasets
+    if not group.is_organization and data_dict.get('object_type') == 'package':
+        permission = 'manage_group'
+
+    authorized = new_authz.has_user_permission_for_group_or_org(group.id,
+                                                                user,
+                                                                permission)
+    if not authorized:
+        return {'success': False,
+                'msg': _('User %s not authorized to edit group %s') %
+                        (str(user), group.id)}
+    else:
+        return {'success': True}

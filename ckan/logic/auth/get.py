@@ -39,6 +39,9 @@ def revision_list(context, data_dict):
 def group_revision_list(context, data_dict):
     return group_show(context, data_dict)
 
+def organization_revision_list(context, data_dict):
+    return group_show(context, data_dict)
+
 def package_revision_list(context, data_dict):
     return package_show(context, data_dict)
 
@@ -132,12 +135,19 @@ def resource_show(context, data_dict):
         raise logic.NotFound(_('No package found for this resource, cannot check auth.'))
 
     pkg_dict = {'id': pkg.id}
-    authorized = package_show(context, pkg_dict).get('success')
+    authorized = new_authz.is_authorized('package_show', context, pkg_dict).get('success')
 
     if not authorized:
         return {'success': False, 'msg': _('User %s not authorized to read resource %s') % (user, resource.id)}
     else:
         return {'success': True}
+
+
+def resource_view_show(context, data_dict):
+    return resource_show(context, data_dict)
+
+def resource_view_list(context, data_dict):
+    return resource_show(context, data_dict)
 
 def revision_show(context, data_dict):
     # No authz check in the logic function
@@ -233,6 +243,10 @@ def group_follower_list(context, data_dict):
     return sysadmin(context, data_dict)
 
 
+def organization_follower_list(context, data_dict):
+    return sysadmin(context, data_dict)
+
+
 def _followee_list(context, data_dict):
     model = context['model']
 
@@ -268,6 +282,9 @@ def dataset_followee_list(context, data_dict):
 def group_followee_list(context, data_dict):
     return _followee_list(context, data_dict)
 
+@logic.auth_audit_exempt
+def organization_followee_list(context, data_dict):
+    return _followee_list(context, data_dict)
 
 def user_reset(context, data_dict):
     return {'success': True}

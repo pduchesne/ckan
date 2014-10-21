@@ -114,48 +114,6 @@ class TestAction(WsgiAppCase):
         assert 'public_dataset' in res
         assert not 'private_dataset' in res
 
-    def test_01_current_package_list_with_resources(self):
-        url = '/api/action/current_package_list_with_resources'
-
-        postparams = '%s=1' % json.dumps({
-            'limit': 1,
-            'offset': 1})
-        res = json.loads(self.app.post(url, params=postparams).body)
-        assert res['success']
-        assert len(res['result']) == 1
-
-        postparams = '%s=1' % json.dumps({
-            'limit': '5'})
-        res = json.loads(self.app.post(url, params=postparams).body)
-        assert res['success']
-
-        postparams = '%s=1' % json.dumps({
-            'limit': -2})
-        res = json.loads(self.app.post(url, params=postparams,
-                         status=StatusCodes.STATUS_409_CONFLICT).body)
-        assert not res['success']
-
-        postparams = '%s=1' % json.dumps({
-            'offset': 'a'})
-        res = json.loads(self.app.post(url, params=postparams,
-                         status=StatusCodes.STATUS_409_CONFLICT).body)
-        assert not res['success']
-
-        postparams = '%s=1' % json.dumps({
-            'limit': 2,
-            'page': 1})
-        res = json.loads(self.app.post(url, params=postparams).body)
-        assert res['success']
-        assert len(res['result']) == 2
-
-        postparams = '%s=1' % json.dumps({
-            'limit': 1,
-            'page': 0})
-        res = json.loads(self.app.post(url,
-                         params=postparams,
-                         status=StatusCodes.STATUS_409_CONFLICT).body)
-        assert not res['success']
-
     def test_01_package_show(self):
         anna_id = model.Package.by_name(u'annakarenina').id
         postparams = '%s=1' % json.dumps({'id': anna_id})
@@ -594,75 +552,6 @@ class TestAction(WsgiAppCase):
             for expected_message in test_call['messages']:
                 assert expected_message[1] in ''.join(res_obj['error'][expected_message[0]])
 
-    @mock.patch('ckan.lib.mailer.send_invite')
-    def test_user_invite(self, send_invite):
-        email_username = 'invited_user$ckan'
-        email = '%s@email.com' % email_username
-        organization_name = 'an_organization'
-        CreateTestData.create_groups([{'name': organization_name}])
-        role = 'member'
-        organization = model.Group.get(organization_name)
-        params = {'email': email,
-                  'group_id': organization.id,
-                  'role': role}
-        postparams = '%s=1' % json.dumps(params)
-        extra_environ = {'Authorization': str(self.sysadmin_user.apikey)}
-
-        res = self.app.post('/api/action/user_invite', params=postparams,
-                            extra_environ=extra_environ)
-
-        res_obj = json.loads(res.body)
-        user = model.User.get(res_obj['result']['id'])
-        assert res_obj['success'] is True, res_obj
-        assert user.email == email, (user.email, email)
-        assert user.is_pending(), user
-        expected_username = email_username.replace('$', '-')
-        assert user.name.startswith(expected_username), (user.name,
-                                                         expected_username)
-        group_ids = user.get_group_ids(capacity=role)
-        assert organization.id in group_ids, (group_ids, organization.id)
-        assert send_invite.called
-        assert send_invite.call_args[0][0].id == res_obj['result']['id']
-
-    @mock.patch('ckan.lib.mailer.mail_user')
-    def test_user_invite_without_email_raises_error(self, mail_user):
-        user_dict = {}
-        postparams = '%s=1' % json.dumps(user_dict)
-        extra_environ = {'Authorization': str(self.sysadmin_user.apikey)}
-
-        res = self.app.post('/api/action/user_invite', params=postparams,
-                            extra_environ=extra_environ,
-                            status=StatusCodes.STATUS_409_CONFLICT)
-
-        res_obj = json.loads(res.body)
-        assert res_obj['success'] is False, res_obj
-        assert 'email' in res_obj['error'], res_obj
-
-    @mock.patch('random.SystemRandom')
-    def test_user_invite_should_work_even_if_tried_username_already_exists(self, system_random_mock):
-        patcher = mock.patch('ckan.lib.mailer.mail_user')
-        patcher.start()
-        email = 'invited_user@email.com'
-        organization_name = 'an_organization'
-        CreateTestData.create_groups([{'name': organization_name}])
-        role = 'member'
-        organization = model.Group.get(organization_name)
-        params = {'email': email,
-                  'group_id': organization.id,
-                  'role': role}
-        postparams = '%s=1' % json.dumps(params)
-        extra_environ = {'Authorization': str(self.sysadmin_user.apikey)}
-
-        system_random_mock.return_value.random.side_effect = [1000, 1000, 2000, 3000]
-
-        for _ in range(2):
-            res = self.app.post('/api/action/user_invite', params=postparams,
-                                extra_environ=extra_environ)
-
-            res_obj = json.loads(res.body)
-            assert res_obj['success'] is True, res_obj
-        patcher.stop()
-
     def test_user_delete(self):
         name = 'normal_user'
         CreateTestData.create_user(name)
@@ -689,83 +578,6 @@ class TestAction(WsgiAppCase):
         res_obj = json.loads(res.body)
         assert res_obj['success'] is False
         assert res_obj['error']['id'] == ['Missing value']
-
-    def test_13_group_list(self):
-        postparams = '%s=1' % json.dumps({})
-        res = self.app.post('/api/action/group_list', params=postparams)
-        res_obj = json.loads(res.body)
-        assert res_obj['result'] == ['david', 'roger']
-        assert res_obj['success'] is True
-        assert res_obj['help'].startswith(
-                "Return a list of the names of the site's groups.")
-
-        # Test GET request
-        res = self.app.get('/api/action/group_list')
-        res_obj = json.loads(res.body)
-        assert res_obj['result'] == ['david', 'roger']
-
-        #Get all fields
-        postparams = '%s=1' % json.dumps({'all_fields':True})
-        res = self.app.post('/api/action/group_list', params=postparams)
-        res_obj = json.loads(res.body)
-
-        assert res_obj['success'] == True
-        assert res_obj['result'][0]['name'] == 'david'
-        assert res_obj['result'][0]['display_name'] == 'Dave\'s books'
-        assert res_obj['result'][0]['packages'] == 2
-        assert res_obj['result'][1]['name'] == 'roger', res_obj['result'][1]
-        assert res_obj['result'][1]['packages'] == 1
-        assert 'id' in res_obj['result'][0]
-        assert 'revision_id' in res_obj['result'][0]
-        assert 'state' in res_obj['result'][0]
-
-    def test_13_group_list_by_size(self):
-        postparams = '%s=1' % json.dumps({'order_by': 'packages'})
-        res = self.app.post('/api/action/group_list',
-                            params=postparams)
-        res_obj = json.loads(res.body)
-        assert_equal(sorted(res_obj['result']), ['david','roger'])
-
-    def test_13_group_list_by_size_all_fields(self):
-        postparams = '%s=1' % json.dumps({'order_by': 'packages',
-                                          'all_fields': 1})
-        res = self.app.post('/api/action/group_list',
-                            params=postparams)
-        res_obj = json.loads(res.body)
-        result = res_obj['result']
-        assert_equal(len(result), 2)
-        assert_equal(result[0]['name'], 'david')
-        assert_equal(result[0]['packages'], 2)
-        assert_equal(result[1]['name'], 'roger')
-        assert_equal(result[1]['packages'], 1)
-
-    def test_14_group_show(self):
-        postparams = '%s=1' % json.dumps({'id':'david'})
-        res = self.app.post('/api/action/group_show', params=postparams)
-        res_obj = json.loads(res.body)
-        assert res_obj['help'].startswith("Return the details of a group.")
-        assert res_obj['success'] == True
-        result = res_obj['result']
-        assert result['name'] == 'david'
-        assert result['title'] == result['display_name'] == 'Dave\'s books'
-        assert result['state'] == 'active'
-        assert 'id' in result
-        assert 'revision_id' in result
-        assert len(result['packages']) == 2
-
-        #Group not found
-        postparams = '%s=1' % json.dumps({'id':'not_present_in_the_db'})
-        res = self.app.post('/api/action/group_show', params=postparams,
-                            status=StatusCodes.STATUS_404_NOT_FOUND)
-
-        res_obj = json.loads(res.body)
-        pprint(res_obj)
-        assert res_obj['error'] == {
-                '__type': 'Not Found Error',
-                'message': 'Not found'
-            }
-        assert res_obj['help'].startswith('Return the details of a group.')
-        assert res_obj['success'] is False
 
     def test_16_user_autocomplete(self):
         # Create deleted user to make sure he won't appear in the user_list
@@ -832,10 +644,10 @@ class TestAction(WsgiAppCase):
 
         resource_updated.pop('url')
         resource_updated.pop('revision_id')
-        resource_updated.pop('revision_timestamp')
+        resource_updated.pop('revision_timestamp', None)
         resource_created.pop('url')
         resource_created.pop('revision_id')
-        resource_created.pop('revision_timestamp')
+        resource_created.pop('revision_timestamp', None)
         assert_equal(resource_updated, resource_created)
 
     def test_20_task_status_update(self):
@@ -1381,6 +1193,189 @@ class TestAction(WsgiAppCase):
         assert error['__type'] == 'Validation Error'
         assert error['extras_validation'] == ['Duplicate key "foo"']
 
+    def test_resource_view_create_not_authorized_if_not_logged_in(self):
+        resource_id = model.Package.by_name(u'annakarenina').resources[0].id
+        resource_view = {'resource_id': resource_id,
+                         'title': u'Resource View',
+                         'view_type': u'image',
+                         'image_url': 'url'}
+        postparams = '%s=1' % json.dumps(resource_view)
+        self.app.post('/api/action/resource_view_create', params=postparams,
+                      status=403)
+
+    def test_resource_view_show(self):
+        resource_id = model.Package.by_name(u'annakarenina').resources[0].id
+        resource_view = {'resource_id': resource_id,
+                         'view_type': u'image',
+                         'title': u'View',
+                         'description': u'A nice view',
+                         'image_url': 'url'}
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ={'Authorization': str(self.normal_user.apikey)})
+        resource_view_created = json.loads(res.body)['result']
+
+        postparams = '%s=1' % json.dumps({'id': resource_view_created['id']})
+        res = self.app.post('/api/action/resource_view_show',
+                            params=postparams)
+        result = json.loads(res.body)['result']
+
+        result.pop('id')
+        result.pop('package_id')
+        assert result == resource_view
+
+    def test_resource_view_list_reorder(self):
+
+        extra_environ = {'Authorization': str(self.normal_user.apikey)}
+
+        resource_id = model.Package.by_name(u'annakarenina').resources[1].id
+        resource_view = {'resource_id': resource_id,
+                         'view_type': u'image',
+                         'title': u'View',
+                         'description': u'A nice view',
+                         'image_url': 'url'}
+
+        #### Make first view ####
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ=extra_environ)
+        resource_id_1 = json.loads(res.body)['result']['id']
+
+        #### Make second view ####
+        resource_view['title'] = 'View2'
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ=extra_environ)
+        resource_id_2 = json.loads(res.body)['result']['id']
+
+        ### Check order is the same
+        postparams = '%s=1' % json.dumps({'id': resource_id})
+        res = self.app.post('/api/action/resource_view_list',
+                            params=postparams)
+        result = json.loads(res.body)['result']
+
+        assert result[0]['title'] == 'View', result[0]['title']
+        assert result[1]['title'] == 'View2', result[1]['title']
+
+        ### Reorder Views
+        postparams = '%s=1' % json.dumps({
+            'id': resource_id,
+            'order': [resource_id_2, resource_id_1]})
+        res = self.app.post('/api/action/resource_view_reorder',
+                            params=postparams, extra_environ=extra_environ)
+        result = json.loads(res.body)['result']
+        assert result['order'] == [resource_id_2, resource_id_1]
+
+        ### Check order is now changed
+        postparams = '%s=1' % json.dumps({'id': resource_id})
+        res = self.app.post('/api/action/resource_view_list',
+                            params=postparams, extra_environ=extra_environ)
+        result = json.loads(res.body)['result']
+
+        assert result[0]['title'] == 'View2', result[0]['title']
+        assert result[1]['title'] == 'View', result[1]['title']
+
+        ### Reorder Views back just by specifiying a single view togo first
+        postparams = '%s=1' % json.dumps({'id': resource_id,
+                                          'order': [resource_id_1]})
+        res = self.app.post('/api/action/resource_view_reorder',
+                            params=postparams, extra_environ=extra_environ)
+        result = json.loads(res.body)['result']
+        assert result['order'] == [resource_id_1, resource_id_2]
+
+        ### Check order is back ot original
+        postparams = '%s=1' % json.dumps({'id': resource_id})
+        res = self.app.post('/api/action/resource_view_list',
+                            params=postparams, extra_environ=extra_environ)
+        result = json.loads(res.body)['result']
+
+        assert result[0]['title'] == 'View', result[0]['title']
+        assert result[1]['title'] == 'View2', result[1]['title']
+
+    def test_resource_view_show_missing_resource_view_id(self):
+        postparams = '%s=1' % json.dumps({})
+        self.app.post('/api/action/resource_view_show',
+                      params=postparams, status=409)
+
+    def test_resource_view_show_invalid_resource_view_id(self):
+        postparams = '%s=1' % json.dumps({'id': u'bad-resource-view-id'})
+        self.app.post('/api/action/resource_view_show',
+                      params=postparams, status=404)
+
+    def test_resource_view_update_invalid_auth(self):
+        resource_id = model.Package.by_name(u'annakarenina').resources[0].id
+        resource_view = {'resource_id': resource_id,
+                         'title': u'Resource View',
+                         'view_type': u'image',
+                         'image_url': 'url'}
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ={'Authorization': str(self.normal_user.apikey)})
+        resource_view_created = json.loads(res.body)['result']
+
+        resource_view.update({'id': resource_view_created['id'],
+                              'image_url': 'new_url'})
+        postparams = '%s=1' % json.dumps(resource_view)
+        self.app.post('/api/action/resource_view_update', params=postparams,
+                      status=403)
+
+    def test_resource_view_delete(self):
+        resource_id = model.Package.by_name(u'annakarenina').resources[0].id
+        resource_view = {'resource_id': resource_id,
+                         'title': u'Resource View',
+                         'view_type': u'image',
+                         'image_url': 'url'}
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ={'Authorization': str(self.normal_user.apikey)})
+        resource_view_created = json.loads(res.body)['result']
+
+        postparams = '%s=1' % json.dumps({'id': resource_view_created['id']})
+        res = self.app.post(
+            '/api/action/resource_view_delete', params=postparams,
+            extra_environ={'Authorization': str(self.sysadmin_user.apikey)})
+        assert json.loads(res.body)['success']
+
+        postparams = '%s=1' % json.dumps({'id': resource_view_created['id']})
+        self.app.post('/api/action/resource_view_show',
+                      params=postparams, status=404)
+
+    def test_resource_view_delete_invalid_auth(self):
+        resource_id = model.Package.by_name(u'annakarenina').resources[0].id
+        resource_view = {'resource_id': resource_id,
+                         'title': u'Resource View',
+                         'view_type': u'image',
+                         'image_url': 'url'}
+        postparams = '%s=1' % json.dumps(resource_view)
+        res = self.app.post(
+            '/api/action/resource_view_create', params=postparams,
+            extra_environ={'Authorization': str(self.normal_user.apikey)})
+        resource_view_created = json.loads(res.body)['result']
+
+        postparams = '%s=1' % json.dumps({'id': resource_view_created['id']})
+        self.app.post('/api/action/resource_view_delete', params=postparams,
+                      status=403)
+
+    def test_resource_view_delete_missing_resource_view_id(self):
+        postparams = '%s=1' % json.dumps({})
+        self.app.post(
+            '/api/action/resource_view_delete', params=postparams,
+            extra_environ={'Authorization': str(self.sysadmin_user.apikey)},
+            status=409)
+
+    def test_resource_view_delete_invalid_resource_view_id(self):
+        postparams = '%s=1' % json.dumps({'id': u'bad-resource-view-id'})
+        self.app.post(
+            '/api/action/resource_view_delete', params=postparams,
+            extra_environ={'Authorization': str(self.sysadmin_user.apikey)},
+            status=404)
+
+
 class TestActionTermTranslation(WsgiAppCase):
 
     @classmethod
@@ -1849,59 +1844,6 @@ class TestBulkActions(WsgiAppCase):
 
         res = self.app.get('/api/action/package_search?q=*:*')
         assert json.loads(res.body)['result']['count'] == 0
-
-
-class TestGroupOrgView(WsgiAppCase):
-
-    @classmethod
-    def setup_class(cls):
-        model.Session.add_all([
-            model.User(name=u'sysadmin', apikey=u'sysadmin',
-                       password=u'sysadmin', sysadmin=True),
-        ])
-        model.Session.commit()
-
-        org_dict = '%s=1' % json.dumps({
-            'name': 'org',
-        })
-        res = cls.app.post('/api/action/organization_create',
-                            extra_environ={'Authorization': 'sysadmin'},
-                            params=org_dict)
-        cls.org_id = json.loads(res.body)['result']['id']
-
-        group_dict = '%s=1' % json.dumps({
-            'name': 'group',
-        })
-        res = cls.app.post('/api/action/group_create',
-                            extra_environ={'Authorization': 'sysadmin'},
-                            params=group_dict)
-        cls.group_id = json.loads(res.body)['result']['id']
-
-    @classmethod
-    def teardown_class(self):
-        model.repo.rebuild_db()
-
-    def test_1_view_org(self):
-        res = self.app.get('/api/action/organization_show',
-                params={'id': self.org_id})
-        res_json = json.loads(res.body)
-        assert res_json['success'] is True
-
-        res = self.app.get('/api/action/group_show',
-                params={'id': self.org_id}, expect_errors=True)
-        res_json = json.loads(res.body)
-        assert res_json['success'] is False
-
-    def test_2_view_group(self):
-        res = self.app.get('/api/action/group_show',
-                params={'id': self.group_id})
-        res_json = json.loads(res.body)
-        assert res_json['success'] is True
-
-        res = self.app.get('/api/action/organization_show',
-                params={'id': self.group_id}, expect_errors=True)
-        res_json = json.loads(res.body)
-        assert res_json['success'] is False
 
 
 class TestResourceAction(WsgiAppCase):

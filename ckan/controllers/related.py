@@ -40,7 +40,7 @@ class RelatedController(base.BaseController):
             base.abort(400, ('"page" parameter must be an integer'))
 
         # Update ordering in the context
-        query = logic.get_action('related_list')(context, data_dict)
+        related_list = logic.get_action('related_list')(context, data_dict)
 
         def search_url(params):
             url = h.url_for(controller='related', action='dashboard')
@@ -55,10 +55,10 @@ class RelatedController(base.BaseController):
             return search_url(params)
 
         c.page = h.Page(
-            collection=query.all(),
+            collection=related_list,
             page=page,
             url=pager_url,
-            item_count=query.count(),
+            item_count=len(related_list),
             items_per_page=9
         )
 
@@ -116,6 +116,8 @@ class RelatedController(base.BaseController):
 
         try:
             c.pkg_dict = logic.get_action('package_show')(context, data_dict)
+            c.related_list = logic.get_action('related_list')(context,
+                                                              data_dict)
             c.pkg = context['package']
             c.resources_json = h.json.dumps(c.pkg_dict.get('resources', []))
         except logic.NotFound:
@@ -175,7 +177,7 @@ class RelatedController(base.BaseController):
                     data['id'] = related_id
                 else:
                     data['dataset_id'] = id
-                data['owner_id'] = c.userobj.id
+                    data['owner_id'] = c.userobj.id
 
                 related = logic.get_action(action_name)(context, data)
 

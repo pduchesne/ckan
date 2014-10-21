@@ -10,7 +10,6 @@ from ckan.lib.dictization import (table_dictize,
 
 from ckan.lib.dictization.model_dictize import (package_dictize,
                                                 resource_dictize,
-                                                group_dictize,
                                                 activity_dictize,
                                                 package_to_api1,
                                                 package_to_api2,
@@ -48,6 +47,8 @@ class TestBasicDictize:
                         'name': u'david',
                         'capacity': 'public',
                         'image_url': u'',
+                        'image_display_url': u'',
+                        'display_name': u"Dave's books",
                         'type': u'group',
                         'state': u'active',
                         'is_organization': False,
@@ -57,6 +58,8 @@ class TestBasicDictize:
                         'name': u'roger',
                         'capacity': 'public',
                         'image_url': u'',
+                        'image_display_url': u'',
+                        'display_name': u"Roger's books",
                         'type': u'group',
                         'state': u'active',
                         'is_organization': False,
@@ -872,131 +875,6 @@ class TestBasicDictize:
 
         package_dictized = self.remove_changable_columns(package_dictize(pkg, context))
 
-    def test_16_group_dictized(self):
-
-        context = {"model": model,
-                  "session": model.Session}
-
-        pkg = model.Session.query(model.Package).filter_by(name='annakarenina3').first()
-
-        simple_group_dict = {'name': 'simple',
-                             'title': 'simple',
-                             'type': 'organization',
-                            }
-        model.repo.new_revision()
-        group_dict_save(simple_group_dict, context)
-        model.Session.commit()
-        model.Session.remove()
-
-        context = {"model": model,
-                  "session": model.Session}
-
-        group_dict = {'name': 'help',
-                      'title': 'help',
-                      'approval_status': 'approved',
-                      'extras': [{'key': 'genre', 'value': u'"horror"'},
-                                 {'key': 'media', 'value': u'"dvd"'}],
-                      'packages':[{'name': 'annakarenina2'}, {'id': pkg.id, 'capacity': 'in'}],
-                      'users':[{'name': 'annafan'}],
-                      'groups':[{'name': 'simple'}],
-                      'tags':[{'name': 'russian'}]
-                      }
-
-        model.repo.new_revision()
-        group_dict_save(group_dict, context)
-        model.Session.commit()
-        model.Session.remove()
-
-        group = model.Session.query(model.Group).filter_by(name=u'help').one()
-
-        context = {"model": model,
-                  "session": model.Session,
-                  "user": None}
-
-        group_dictized = group_dictize(group, context)
-
-        expected = {'description': u'',
-                    'extras': [{'key': u'genre', 'state': u'active', 'value': u'"horror"'},
-                               {'key': u'media', 'state': u'active', 'value': u'"dvd"'}],
-                    'tags': [{'capacity': u'public', 'display_name': u'russian', 'name': u'russian'}],
-                    'groups': [{'description': u'',
-                               'capacity' : 'public',
-                               'display_name': u'simple',
-                               'image_url': u'',
-                               'image_display_url': u'',
-                               'name': u'simple',
-                               'packages': 0,
-                               'state': u'active',
-                               'is_organization': False,
-                               'title': u'simple',
-                               'type': u'organization',
-                               'approval_status': u'approved'}],
-                    'users': [{'about': u'I love reading Annakarenina. My site: http://anna.com',
-                              'display_name': u'annafan',
-                              'capacity' : 'public',
-                              'state': 'active',
-                              'sysadmin': False,
-                              'email_hash': 'd41d8cd98f00b204e9800998ecf8427e',
-                              'fullname': None,
-                              'name': u'annafan',
-                              'number_administered_packages': 1L,
-                              'number_of_edits': 0L,
-                              'activity_streams_email_notifications': False,
-                              }],
-                    'name': u'help',
-                    'display_name': u'help',
-                    'image_url': u'',
-                    'image_display_url': u'',
-                    'package_count': 2,
-                    'is_organization': False,
-                    'packages': [{'author': None,
-                                  'author_email': None,
-                                  'license_id': u'other-open',
-                                  'maintainer': None,
-                                  'maintainer_email': None,
-                                  'type': u'dataset',
-                                  'name': u'annakarenina3',
-                                  'notes': u'Some test notes\n\n### A 3rd level heading\n\n**Some bolded text.**\n\n*Some italicized text.*\n\nForeign characters:\nu with umlaut \xfc\n66-style quote \u201c\nforeign word: th\xfcmb\n\nNeeds escaping:\nleft arrow <\n\n<http://ckan.net/>\n\n',
-                                  'state': u'active',
-                                  'capacity' : 'in',
-                                  'title': u'A Novel By Tolstoy',
-                                  'private': False,
-                                  'creator_user_id': None,
-                                  'owner_org': None,
-                                  'url': u'http://www.annakarenina.com',
-                                  'version': u'0.7a'},
-                                 {'author': None,
-                                  'author_email': None,
-                                  'capacity' : 'public',
-                                  'title': u'A Novel By Tolstoy',
-                                  'license_id': u'other-open',
-                                  'maintainer': None,
-                                  'maintainer_email': None,
-                                  'type': u'dataset',
-                                  'name': u'annakarenina2',
-                                  'notes': u'Some test notes\n\n### A 3rd level heading\n\n**Some bolded text.**\n\n*Some italicized text.*\n\nForeign characters:\nu with umlaut \xfc\n66-style quote \u201c\nforeign word: th\xfcmb\n\nNeeds escaping:\nleft arrow <\n\n<http://ckan.net/>\n\n',
-                                  'state': u'active',
-                                  'title': u'A Novel By Tolstoy',
-                                  'private': False,
-                                  'creator_user_id': None,
-                                  'owner_org': None,
-                                  'url': u'http://www.annakarenina.com',
-                                  'version': u'0.7a'}],
-                    'state': u'active',
-                    'approval_status': u'approved',
-                    'title': u'help',
-                    'type': u'group'}
-        expected['packages'] = sorted(expected['packages'], key=lambda x: x['name'])
-        result = self.remove_changable_columns(group_dictized)
-        result['packages'] = sorted(result['packages'], key=lambda x: x['name'])
-
-        assert_equal(sorted(result.keys()), sorted(expected.keys()))
-        
-        for key in result:
-            if key in ('is_organization', 'package_count'):
-                continue
-            assert_equal(sorted(result[key]), sorted(expected[key]))
-        assert_equal(result['package_count'], expected['package_count'])
 
     def test_17_group_apis_to_dict(self):
 

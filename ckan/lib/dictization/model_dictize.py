@@ -1,3 +1,14 @@
+'''
+These dictize functions generally take a domain object (such as Package) and
+convert it to a dictionary, including related objects (e.g. for Package it
+includes PackageTags, PackageExtras, PackageGroup etc).
+
+The basic recipe is to call:
+
+    dictized = ckan.lib.dictization.table_dictize(domain_object)
+
+which builds the dictionary by iterating over the table columns.
+'''
 import datetime
 import urlparse
 
@@ -15,58 +26,37 @@ import ckan.lib.munge as munge
 ## package save
 
 def group_list_dictize(obj_list, context,
-                       sort_key=lambda x:x['display_name'], reverse=False):
+                       sort_key=lambda x: x['display_name'], reverse=False,
+                       with_package_counts=True,
+                       include_groups=False,
+                       include_tags=False,
+                       include_extras=False):
 
-    active = context.get('active', True)
-    with_private = context.get('include_private_packages', False)
+    group_dictize_context = dict(context.items()[:])
+    # Set options to avoid any SOLR queries for each group, which would
+    # slow things further.
+    group_dictize_options = {
+            'packages_field': 'dataset_count' if with_package_counts else None,
+            # don't allow packages_field='datasets' as it is too slow
+            'include_groups': include_groups,
+            'include_tags': include_tags,
+            'include_extras': include_extras,
+            'include_users': False,  # too slow - don't allow
+            }
+    if with_package_counts and 'dataset_counts' not in group_dictize_context:
+        # 'dataset_counts' will already be in the context in the case that
+        # group_list_dictize recurses via group_dictize (groups in groups)
+        group_dictize_context['dataset_counts'] = get_group_dataset_counts()
+    if context.get('with_capacity'):
+        group_list = [group_dictize(group, group_dictize_context,
+                                    capacity=capacity, **group_dictize_options)
+                      for group, capacity in obj_list]
+    else:
+        group_list = [group_dictize(group, group_dictize_context,
+                                    **group_dictize_options)
+                      for group in obj_list]
 
-    query = search.PackageSearchQuery()
-
-    q = {'q': '+capacity:public' if not with_private else '*:*',
-         'fl': 'groups', 'facet.field': ['groups', 'owner_org'],
-         'facet.limit': -1, 'rows': 1}
-
-    query.run(q)
-
-    result_list = []
-
-    for obj in obj_list:
-        if context.get('with_capacity'):
-            obj, capacity = obj
-            group_dict = d.table_dictize(obj, context, capacity=capacity)
-        else:
-            group_dict = d.table_dictize(obj, context)
-        group_dict.pop('created')
-        if active and obj.state not in ('active', 'pending'):
-            continue
-
-        group_dict['display_name'] = obj.display_name
-
-        image_url = group_dict.get('image_url')
-        group_dict['image_display_url'] = image_url
-        if image_url and not image_url.startswith('http'):
-            #munge here should not have an effect only doing it incase
-            #of potential vulnerability of dodgy api input
-            image_url = munge.munge_filename(image_url)
-            group_dict['image_display_url'] = h.url_for_static(
-                'uploads/group/%s' % group_dict.get('image_url')
-            )
-
-        if obj.is_organization:
-            group_dict['packages'] = query.facets['owner_org'].get(obj.id, 0)
-        else:
-            group_dict['packages'] = query.facets['groups'].get(obj.name, 0)
-
-        if context.get('for_view'):
-            if group_dict['is_organization']:
-                plugin = plugins.IOrganizationController
-            else:
-                plugin = plugins.IGroupController
-            for item in plugins.PluginImplementations(plugin):
-                group_dict = item.before_view(group_dict)
-
-        result_list.append(group_dict)
-    return sorted(result_list, key=sort_key, reverse=reverse)
+    return sorted(group_list, key=sort_key, reverse=reverse)
 
 def resource_list_dictize(res_list, context):
 
@@ -86,7 +76,8 @@ def related_list_dictize(related_list, context):
     for res in related_list:
         related_dict = related_dictize(res, context)
         result_list.append(related_dict)
-
+    if context.get('sorted'):
+        return result_list
     return sorted(result_list, key=lambda x: x["created"], reverse=True)
 
 
@@ -113,40 +104,30 @@ def extras_list_dictize(extras_list, context):
 
     return sorted(result_list, key=lambda x: x["key"])
 
-def _unified_resource_format(format_):
-    ''' Convert resource formats into a more uniform set.
-    eg .json, json, JSON, text/json all converted to JSON.'''
-
-    format_clean = format_.lower().split('/')[-1].replace('.', '')
-    formats = {
-        'csv' : 'CSV',
-        'zip' : 'ZIP',
-        'pdf' : 'PDF',
-        'xls' : 'XLS',
-        'json' : 'JSON',
-        'kml' : 'KML',
-        'xml' : 'XML',
-        'shape' : 'SHAPE',
-        'rdf' : 'RDF',
-        'txt' : 'TXT',
-        'text' : 'TEXT',
-        'html' : 'HTML',
-    }
-    if format_clean in formats:
-        format_new = formats[format_clean]
-    else:
-        format_new = format_.lower()
-    return format_new
 
 def resource_dictize(res, context):
+    model = context['model']
     resource = d.table_dictize(res, context)
+    resource_group_id = resource['resource_group_id']
     extras = resource.pop("extras", None)
     if extras:
         resource.update(extras)
-    resource['format'] = _unified_resource_format(res.format)
     # some urls do not have the protocol this adds http:// to these
     url = resource['url']
-    if not urlparse.urlsplit(url).scheme:
+    ## for_edit is only called at the times when the dataset is to be edited
+    ## in the frontend. Without for_edit the whole qualified url is returned.
+    if resource.get('url_type') == 'upload' and not context.get('for_edit'):
+        resource_group = model.Session.query(
+            model.ResourceGroup).get(resource_group_id)
+        last_part = url.split('/')[-1]
+        cleaned_name = munge.munge_filename(last_part)
+        resource['url'] = h.url_for(controller='package',
+                                    action='resource_download',
+                                    id=resource_group.package_id,
+                                    resource_id=res.id,
+                                    filename=cleaned_name,
+                                    qualified=True)
+    elif not urlparse.urlsplit(url).scheme and not context.get('for_edit'):
         resource['url'] = u'http://' + url.lstrip('/')
     return resource
 
@@ -259,7 +240,12 @@ def package_dictize(pkg, context):
                 .where(member_rev.c.state == 'active') \
                 .where(group.c.is_organization == False)
     result = _execute_with_revision(q, member_rev, context)
-    result_dict["groups"] = d.obj_list_dictize(result, context)
+    context['with_capacity'] = False
+    ## no package counts as cannot fetch from search index at the same
+    ## time as indexing to it.
+    ## tags, extras and sub-groups are not included for speed
+    result_dict["groups"] = group_list_dictize(result, context,
+                                               with_package_counts=False)
     #owning organization
     group_rev = model.group_revision_table
     q = select([group_rev]
@@ -324,39 +310,113 @@ def _get_members(context, group, member_type):
     return q.all()
 
 
-def group_dictize(group, context):
-    model = context['model']
+def get_group_dataset_counts():
+    '''For all public groups, return their dataset counts, as a SOLR facet'''
+    query = search.PackageSearchQuery()
+    q = {'q': '+capacity:public',
+         'fl': 'groups', 'facet.field': ['groups', 'owner_org'],
+         'facet.limit': -1, 'rows': 1}
+    query.run(q)
+    return query.facets
+
+
+def group_dictize(group, context,
+                  include_groups=True,
+                  include_tags=True,
+                  include_users=True,
+                  include_extras=True,
+                  packages_field='datasets',
+                  **kw):
+    '''
+    Turns a Group object and related into a dictionary. The related objects
+    like tags are included unless you specify it in the params.
+
+    :param packages_field: determines the format of the `packages` field - can
+    be `datasets`, `dataset_count`, `none_but_include_package_count` or None.
+    If set to `dataset_count` or `none_but_include_package_count` then you
+    can precalculate dataset counts in advance by supplying:
+    context['dataset_counts'] = get_group_dataset_counts()
+    '''
+    assert packages_field in ('datasets', 'dataset_count',
+                              'none_but_include_package_count', None)
+    if packages_field in ('dataset_count', 'none_but_include_package_count'):
+        dataset_counts = context.get('dataset_counts', None)
+
     result_dict = d.table_dictize(group, context)
+    result_dict.update(kw)
 
-    result_dict['display_name'] = group.display_name
+    result_dict['display_name'] = group.title or group.name
 
-    result_dict['extras'] = extras_dict_dictize(
-        group._extras, context)
+    if include_extras:
+        result_dict['extras'] = extras_dict_dictize(
+            group._extras, context)
 
     context['with_capacity'] = True
 
-    result_dict['packages'] = d.obj_list_dictize(
-        _get_members(context, group, 'packages'),
-        context)
+    if packages_field:
+        def get_packages_for_this_group(group_):
+            # Ask SOLR for the list of packages for this org/group
+            q = {
+                'facet': 'false',
+                'rows': 0,
+            }
 
-    query = search.PackageSearchQuery()
-    if group.is_organization:
-        q = {'q': 'owner_org:"%s" +capacity:public' % group.id, 'rows': 1}
-    else:
-        q = {'q': 'groups:"%s" +capacity:public' % group.name, 'rows': 1}
-    result_dict['package_count'] = query.run(q)['count']
+            if group_.is_organization:
+                q['fq'] = 'owner_org:"{0}"'.format(group_.id)
+            else:
+                q['fq'] = 'groups:"{0}"'.format(group_.name)
 
-    result_dict['tags'] = tag_list_dictize(
-        _get_members(context, group, 'tags'),
-        context)
+            # Allow members of organizations to see private datasets.
+            if group_.is_organization:
+                is_group_member = (context.get('user') and
+                    new_authz.has_user_permission_for_group_or_org(
+                        group_.id, context.get('user'), 'read'))
+                if is_group_member:
+                    context['ignore_capacity_check'] = True
 
-    result_dict['groups'] = group_list_dictize(
-        _get_members(context, group, 'groups'),
-        context)
+            if not context.get('for_view'):
+                q['rows'] = 1000    # Only the first 1000 datasets are returned
 
-    result_dict['users'] = user_list_dictize(
-        _get_members(context, group, 'users'),
-        context)
+            search_context = dict((k, v) for (k, v) in context.items() if k != 'schema')
+            search_results = logic.get_action('package_search')(search_context, q)
+            return search_results['count'], search_results['results']
+        if packages_field == 'datasets':
+            package_count, packages = get_packages_for_this_group(group)
+            result_dict['packages'] = packages
+        else:
+            # i.e. packages_field is 'dataset_count' or
+            # 'none_but_include_package_count'
+            if dataset_counts is None:
+                package_count, packages = get_packages_for_this_group(group)
+            else:
+                # Use the pre-calculated package_counts passed in.
+                facets = dataset_counts
+                if group.is_organization:
+                    package_count = facets['owner_org'].get(group.id, 0)
+                else:
+                    package_count = facets['groups'].get(group.name, 0)
+            if packages_field != 'none_but_include_package_count':
+                result_dict['packages'] = package_count
+
+        result_dict['package_count'] = package_count
+
+    if include_tags:
+        # group tags are not creatable via the API yet, but that was(/is) a
+        # future intention (see kindly's commit 5c8df894 on 2011/12/23)
+        result_dict['tags'] = tag_list_dictize(
+            _get_members(context, group, 'tags'),
+            context)
+
+    if include_groups:
+        # these sub-groups won't have tags or extras for speed
+        result_dict['groups'] = group_list_dictize(
+            _get_members(context, group, 'groups'),
+            context, include_groups=True)
+
+    if include_users:
+        result_dict['users'] = user_list_dictize(
+            _get_members(context, group, 'users'),
+            context)
 
     context['with_capacity'] = False
 
@@ -452,6 +512,9 @@ def user_list_dictize(obj_list, context,
 
     for obj in obj_list:
         user_dict = user_dictize(obj, context)
+        user_dict.pop('reset_key', None)
+        user_dict.pop('apikey', None)
+        user_dict.pop('email', None)
         result_list.append(user_dict)
     return sorted(result_list, key=sort_key, reverse=reverse)
 
@@ -476,13 +539,24 @@ def user_dictize(user, context):
 
     requester = context.get('user')
 
-    if not (new_authz.is_sysadmin(requester) or
-            requester == user.name or
-            context.get('keep_sensitive_data', False)):
-        # If not sysadmin or the same user, strip sensible info
-        result_dict.pop('apikey', None)
-        result_dict.pop('reset_key', None)
-        result_dict.pop('email', None)
+    reset_key = result_dict.pop('reset_key', None)
+    apikey = result_dict.pop('apikey', None)
+    email = result_dict.pop('email', None)
+
+    if context.get('keep_email', False):
+        result_dict['email'] = email
+
+    if context.get('keep_apikey', False):
+        result_dict['apikey'] = apikey
+
+    if requester == user.name:
+        result_dict['apikey'] = apikey
+        result_dict['email'] = email
+
+    ## this should not really really be needed but tests need it
+    if new_authz.is_sysadmin(requester):
+        result_dict['apikey'] = apikey
+        result_dict['email'] = email
 
     model = context['model']
     session = model.Session
@@ -653,3 +727,20 @@ def user_following_dataset_dictize(follower, context):
 
 def user_following_group_dictize(follower, context):
     return d.table_dictize(follower, context)
+
+def resource_view_dictize(resource_view, context):
+    dictized = d.table_dictize(resource_view, context)
+    dictized.pop('order')
+    config = dictized.pop('config', {})
+    dictized.update(config)
+    resource = context['model'].Resource.get(resource_view.resource_id)
+    package_id = resource.resource_group.package_id
+    dictized['package_id'] = package_id
+    return dictized
+
+def resource_view_list_dictize(resource_views, context):
+    resource_view_dicts = []
+    for view in resource_views:
+        resource_view_dicts.append(resource_view_dictize(view, context))
+    return resource_view_dicts
+
