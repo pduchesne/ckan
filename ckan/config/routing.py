@@ -363,7 +363,7 @@ def make_map():
         m.connect('user_edit', '/user/edit/{id:.*}', action='edit',
                   ckan_icon='cog')
         m.connect('/user/reset/{id:.*}', action='perform_reset')
-        m.connect('register', '/user/register', action='register')
+        #m.connect('register', '/user/register', action='register') disable registration altogether
         m.connect('login', '/user/login', action='login')
         m.connect('/user/_logout', action='logout')
         m.connect('/user/logged_in', action='logged_in')
