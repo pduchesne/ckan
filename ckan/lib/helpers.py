@@ -2329,12 +2329,13 @@ def license_options(existing_license_id=None):
     '''
     register = model.Package.get_license_register()
     sorted_licenses = sorted(register.values(), key=lambda x: x.title)
-    license_ids = [license.id for license in sorted_licenses]
+    license_ids = [license.id for license in sorted_licenses if (license.status == 'active' or not license.status)]
     if existing_license_id and existing_license_id not in license_ids:
         license_ids.insert(0, existing_license_id)
     return [
         (license_id,
-         register[license_id].title if license_id in register else license_id)
+         register[license_id].title if license_id in register else license_id,
+         register[license_id].status if license_id in register else None)
         for license_id in license_ids]
 
 

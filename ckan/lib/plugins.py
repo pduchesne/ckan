@@ -288,7 +288,7 @@ class DefaultDatasetForm(object):
 
         c.groups_available = authz_fn(context, data_dict)
 
-        c.licenses = [('', '')] + base.model.Package.get_license_options()
+        c.licenses = [('', '', '')] + base.model.Package.get_license_options()
         c.is_sysadmin = ckan.authz.is_sysadmin(c.user)
 
         if context.get('revision_id') or context.get('revision_date'):
