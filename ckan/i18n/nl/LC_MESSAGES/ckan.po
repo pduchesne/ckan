@@ -2562,7 +2562,7 @@ msgstr "Kies een veld"
 #: ckan/templates/package/resource_edit_base.html:12
 #: ckan/templates/package/snippets/resource_item.html:56
 msgid "Edit"
-msgstr "Bijwerk"
+msgstr "Bewerk"
 
 #: ckan/public/base/javascript/modules/table-toggle-more.js:25
 msgid "Show more"
