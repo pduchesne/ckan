@@ -79,7 +79,7 @@ class Stats(object):
         return results
 
     @classmethod
-    def most_viewed_packages(cls, limit=10):
+    def most_viewed_packages(cls, limit=20):
 
         context = {'model': model, 'session': model.Session,
         #           'user': c.user or c.author, 'for_view': True,
