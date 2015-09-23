@@ -14,6 +14,8 @@ class StatsController(BaseController):
         rev_stats = stats_lib.RevisionStats()
         c.top_rated_packages = stats.top_rated_packages()
         c.most_edited_packages = stats.most_edited_packages()
+        c.most_viewed_packages = stats.most_viewed_packages()
+        #c.most_downloaded_resources = stats.most_downloaded_resources()
         c.largest_groups = stats.largest_groups()
         c.top_tags = stats.top_tags()
         c.top_package_creators = stats.top_package_creators()

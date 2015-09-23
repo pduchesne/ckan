@@ -7,6 +7,9 @@ from sqlalchemy import Table, select, join, func, and_
 
 import ckan.plugins as p
 import ckan.model as model
+import ckan.logic as logic
+
+get_action = logic.get_action
 
 cache_enabled = p.toolkit.asbool(config.get('ckanext.stats.cache_enabled', 'True'))
 
@@ -52,6 +55,52 @@ class Stats(object):
         res_ids = model.Session.execute(s).fetchall()
         res_pkgs = [(model.Session.query(model.Package).get(unicode(pkg_id)), val) for pkg_id, val in res_ids]
         return res_pkgs
+
+    @classmethod
+    def most_downloaded_resources(cls, limit=20):
+
+        context = {
+            'model':model,
+            'session': model.Session,
+            'search_query': True,
+            }
+
+        data_dict = {
+            'query': 'format:',
+            'offset': 0,
+            'limit': limit,
+            #'order_by': options.get('order_by')
+        }
+        results = logic.get_action('resource_search')(context, data_dict)['results']
+
+        for resource_dict in results:
+            tracking_summary = model.TrackingSummary.get_for_resource(
+                resource_dict.url)
+            resource_dict.tracking_summary = tracking_summary
+
+        return results
+
+    @classmethod
+    def most_viewed_packages(cls, limit=20):
+
+        context = {'model': model, 'session': model.Session,
+        #           'user': c.user or c.author, 'for_view': True,
+        #          'auth_user_obj': c.userobj
+        }
+
+        data_dict = {
+            #'q': q,
+            #'fq': fq.strip(),
+            #'facet.field': facets.keys(),
+            'rows': limit,
+            'start': 0,
+            'sort': 'views_total desc',
+            #'extras': search_extras
+        }
+
+        query = get_action('package_search')(context, data_dict)
+
+        return query['results']
 
     @classmethod
     def largest_groups(cls, limit=10):
