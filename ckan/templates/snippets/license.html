@@ -1,6 +1,7 @@
 {% macro license_string(pkg_dict) %}
-  {% if 'license_url' in pkg_dict %}
-    <a href="{{ pkg_dict.license_url }}" rel="dc:rights">{{ pkg_dict.license_title }}</a>
+  {% set lic_url = pkg_dict.license_url if 'license_url' in pkg_dict else (pkg_dict.license_id if pkg_dict.license_id.startswith('http://') else None) %}
+  {% if lic_url %}
+    <a href="{{ lic_url }}" rel="dc:rights">{{ pkg_dict.license_title }}</a>
   {% else %}
     <span property="dc:rights">{{ pkg_dict.license_title }}</span>
   {% endif %}
