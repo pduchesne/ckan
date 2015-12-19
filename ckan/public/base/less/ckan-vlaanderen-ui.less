@@ -6,6 +6,12 @@
 
 @import "../vendor/bootstrap/less/variables.less"; // Modify this for custom colors, font-sizes, etc
 @import "../vendor/bootstrap/less/mixins.less";
+
+// Components: Nav
+@import "../vendor/bootstrap/less/navs.less";
+//@import "../vendor/bootstrap/less/navbar.less";
+
+
 @import "../vendor/bootstrap/less/modals.less";
 @import "../vendor/bootstrap/less/utilities.less";
 
@@ -27,9 +33,9 @@
 //@import "homepage.less";
 //@import "masthead.less";
 //@import "footer.less";
-//@import "tables.less";
+@import "tables.less";
 //@import "profile.less";
-//@import "activity.less";
+@import "activity.less";
 //@import "dropdown.less";
 //@import "dashboard.less";
 //@import "resource-view.less";
@@ -37,3 +43,8 @@
 //
 //
 //@import "iehacks.less";
+
+.activity .item .icon {
+  position: relative;
+  float: left;
+}
