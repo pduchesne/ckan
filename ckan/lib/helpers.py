@@ -160,6 +160,20 @@ def url_for_static(*args, **kw):
     return url_for_static_or_external(*args, **kw)
 
 
+def parse_url(*args, **kw):
+    if args:
+        url = urlparse.urlparse(args[0])
+    return url
+
+
+def parse_url_query(*args, **kw):
+    if args:
+        url = parse_url(args[0])
+        if url:
+            q = urlparse.parse_qs(url.query)
+    return q
+
+
 def url_for_static_or_external(*args, **kw):
     '''Returns the URL for static content that doesn't get translated (eg CSS),
     or external URLs
@@ -2004,6 +2018,8 @@ __allowed_functions__ = [
     'url_for_static',
     'url_for_static_or_external',
     'is_url',
+    'parse_url',
+    'parse_url_query',
     'lang',
     'flash',
     'flash_error',

@@ -4843,3 +4843,8 @@ msgstr ""
 #: ckanext/webpageview/theme/templates/webpage_form.html:3
 msgid "eg. http://example.com (if blank uses resource url)"
 msgstr ""
+
+#: ckan/ckan/templates/snippets/license.html:21
+#, python-format
+msgid " See <a href=\"%(url)s\">original metadata record</a> for more information "
+msgstr " Zie <a href=\"%(url)s\">originele metadatarecord</a> voor meer informatie "
