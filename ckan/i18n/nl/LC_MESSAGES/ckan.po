@@ -4672,3 +4672,8 @@ msgstr "Geen volgers"
 #: ckan/templates/user/snippets/user_search.html:5
 msgid "Search Users"
 msgstr "Zoek Gebruikers"
+
+#: ckan/ckan/templates/snippets/license.html:21
+#, python-format
+msgid " See <a href=\"%(url)s\">original metadata record</a> for more information "
+msgstr " Zie <a href=\"%(url)s\">originele metadatarecord</a> voor meer informatie "

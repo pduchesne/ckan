@@ -274,6 +274,20 @@ def url_for_static(*args, **kw):
             raise CkanUrlException('External URL passed to url_for_static()')
     return url_for_static_or_external(*args, **kw)
 
+@core_helper
+def parse_url(*args, **kw):
+    if args:
+        url = urlparse.urlparse(args[0])
+    return url
+
+@core_helper
+def parse_url_query(*args, **kw):
+    if args:
+        url = parse_url(args[0])
+        if url:
+            q = urlparse.parse_qs(url.query)
+    return q
+
 
 @core_helper
 def url_for_static_or_external(*args, **kw):
@@ -2321,94 +2335,121 @@ def get_organization(org=None, include_datasets=False):
     except (logic.NotFound, logic.ValidationError, logic.NotAuthorized):
         return {}
 
-
-@core_helper
-def license_options(existing_license_id=None):
-    '''Returns [(l.title, l.id), ...] for the licenses configured to be
-    offered. Always includes the existing_license_id, if supplied.
-    '''
-    register = model.Package.get_license_register()
-    sorted_licenses = sorted(register.values(), key=lambda x: x.title)
-    license_ids = [license.id for license in sorted_licenses if (license.status == 'active' or not license.status)]
-    if existing_license_id and existing_license_id not in license_ids:
-        license_ids.insert(0, existing_license_id)
-    return [
-        (license_id,
-         register[license_id].title if license_id in register else license_id,
-         register[license_id].status if license_id in register else None)
-        for license_id in license_ids]
-
-
-@core_helper
-def get_translated(data_dict, field):
-    language = i18n.get_lang()
-    try:
-        return data_dict[field + u'_translated'][language]
-    except KeyError:
-        val = data_dict.get(field, '')
-        return _(val) if val and isinstance(val, basestring) else val
-
-
-@core_helper
-def facets():
-    u'''Returns a list of the current facet names'''
-    return config.get(u'search.facets', DEFAULT_FACET_NAMES).split()
-
-
-@core_helper
-def mail_to(email_address, name):
-    email = escape(email_address)
-    author = escape(name)
-    html = Markup(u'<a href=mailto:{0}>{1}</a>'.format(email, author))
-    return html
-
-
-@core_helper
-def radio(selected, id, checked):
-    if checked:
-        return literal((u'<input checked="checked" id="%s_%s" name="%s" \
-            value="%s" type="radio">') % (selected, id, selected, id))
-    return literal(('<input id="%s_%s" name="%s" \
-        value="%s" type="radio">') % (selected, id, selected, id))
-
-
-core_helper(flash, name='flash')
-core_helper(localised_number)
-core_helper(localised_SI_number)
-core_helper(localised_nice_date)
-core_helper(localised_filesize)
-# Useful additionsfrom the i18n library.
-core_helper(i18n.get_available_locales)
-core_helper(i18n.get_locales_dict)
-# Useful additions from the webhelpers library.
-core_helper(tags.literal)
-core_helper(tags.link_to)
-core_helper(tags.file)
-core_helper(tags.submit)
-core_helper(whtext.truncate)
-# Useful additions from the paste library.
-core_helper(converters.asbool)
-# Useful additions from the stdlib.
-core_helper(urlencode)
-core_helper(clean_html, name='clean_html')
-
-
-def load_plugin_helpers():
-    """
-    (Re)loads the list of helpers provided by plugins.
-    """
-    global helper_functions
-
-    helper_functions.clear()
-    helper_functions.update(_builtin_functions)
-
-    for plugin in reversed(list(p.PluginImplementations(p.ITemplateHelpers))):
-        helper_functions.update(plugin.get_helpers())
-
-
-@core_helper
-def sanitize_id(id_):
-    '''Given an id (uuid4), if it has any invalid characters it raises
-    ValueError.
-    '''
-    return str(uuid.UUID(id_))
+# these are the functions that will end up in `h` template helpers
+__allowed_functions__ = [
+    # functions defined in ckan.lib.helpers
+    'redirect_to',
+    'url',
+    'url_for',
+    'url_for_static',
+    'url_for_static_or_external',
+    'is_url',
+    'lang',
+    'flash',
+    'flash_error',
+    'flash_notice',
+    'flash_success',
+    'nav_link',
+    'nav_named_link',
+    'subnav_link',
+    'subnav_named_route',
+    'default_group_type',
+    'check_access',
+    'get_action',
+    'linked_user',
+    'group_name_to_title',
+    'markdown_extract',
+    'icon',
+    'icon_html',
+    'icon_url',
+    'resource_icon',
+    'format_icon',
+    'linked_gravatar',
+    'gravatar',
+    'pager_url',
+    'render_datetime',
+    'date_str_to_datetime',
+    'parse_rfc_2822_date',
+    'time_ago_in_words_from_str',
+    'button_attr',
+    'dataset_display_name',
+    'dataset_link',
+    'resource_display_name',
+    'resource_link',
+    'related_item_link',
+    'tag_link',
+    'group_link',
+    'dump_json',
+    'auto_log_message',
+    'snippet',
+    'convert_to_dict',
+    'activity_div',
+    'lang_native_name',
+    'get_facet_items_dict',
+    'unselected_facet_items',
+    'include_resource',
+    'urls_for_resource',
+    'build_nav_main',
+    'build_nav_icon',
+    'build_nav',
+    'debug_inspect',
+    'dict_list_reduce',
+    'full_current_url',
+    'popular',
+    'debug_full_info_as_list',
+    'get_facet_title',
+    'get_param_int',
+    'sorted_extras',
+    'follow_button',
+    'follow_count',
+    'remove_url_param',
+    'add_url_param',
+    'groups_available',
+    'organizations_available',
+    'user_in_org_or_group',
+    'dashboard_activity_stream',
+    'recently_changed_packages_activity_stream',
+    'escape_js',
+    'get_pkg_dict_extra',
+    'get_request_param',
+    'render_markdown',
+    'format_resource_items',
+    'resource_preview',
+    'rendered_resource_view',
+    'resource_view_get_fields',
+    'resource_view_is_filterable',
+    'resource_view_is_iframed',
+    'resource_view_icon',
+    'resource_view_display_preview',
+    'resource_view_full_page',
+    'remove_linebreaks',
+    'SI_number_span',
+    'localised_number',
+    'localised_SI_number',
+    'localised_nice_date',
+    'localised_filesize',
+    'list_dict_filter',
+    'new_activities',
+    'time_ago_from_timestamp',
+    'get_organization',
+    'has_more_facets',
+    # imported into ckan.lib.helpers
+    'literal',
+    'link_to',
+    'get_available_locales',
+    'get_locales_dict',
+    'truncate',
+    'file',
+    'mail_to',
+    'radio',
+    'submit',
+    'asbool',
+    'uploads_enabled',
+    'get_featured_organizations',
+    'get_featured_groups',
+    'get_site_statistics',
+    'get_allowed_view_types',
+    'urlencode',
+    'check_config_permission',
+    'view_resource_url',
+]

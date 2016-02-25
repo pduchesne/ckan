@@ -12,7 +12,17 @@
     {% if pkg_dict.license_id %}
       {{ license_string(pkg_dict) }}
     {% else %}
-      {{ _('No License Provided') }}
+        {{ _('No License Provided') }}<br/>
+        {% set metadata_request = h.get_pkg_dict_extra(c.pkg_dict, 'metadata_request', '') %}
+        {% if metadata_request and metadata_request.startswith('http://metadata.geopunt.be/zoekdienst') %}
+            {% set parse_url_query = h.parse_url_query(metadata_request) %}
+            {% if parse_url_query['id'] %}
+                {% trans url='https://metadata.geopunt.be/zoekdienst/apps/tabsearch/index.html?uuid='+parse_url_query['id'][0] %}
+                    See <a href="{{ url }}">original metadata record</a> for more information
+                {% endtrans %}
+
+            {% endif %}
+        {% endif %}
     {% endif %}
   {% else %}
     {% if pkg_dict.license_id %}
