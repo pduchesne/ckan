@@ -1841,6 +1841,13 @@ def get_pkg_dict_extra(pkg_dict, key, default=None):
 
 
 @core_helper
+def get_pkg_tag_list(pkg_dict):
+
+    tags = pkg_dict['tags'] if 'tags' in pkg_dict else []
+
+    return [tag['name'].lower() for tag in tags]
+
+@core_helper
 def get_request_param(parameter_name, default=None):
     ''' This function allows templates to access query string parameters
     from the request. This is useful for things like sort order in
@@ -2411,6 +2418,7 @@ __allowed_functions__ = [
     'recently_changed_packages_activity_stream',
     'escape_js',
     'get_pkg_dict_extra',
+    'get_pkg_tag_list',
     'get_request_param',
     'render_markdown',
     'format_resource_items',
