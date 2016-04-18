@@ -72,6 +72,10 @@
     null,
     "Wijzig sortering bronnen"
   ],
+  "Reorder resource view": [
+    null,
+    "Hersorteer"
+],
   "Resource uploaded": [
     null,
     "De bron is geupload"
