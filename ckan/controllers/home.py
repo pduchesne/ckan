@@ -77,6 +77,9 @@ class HomeController(base.BaseController):
                 % config.get('ckan.site_title')
             h.flash_notice(msg, allow_html=True)
 
+        if len(h.organizations_available('read')) == 0:
+            h.flash_notice(_('You are not part of any organization. You must be member of an organization to submit or update datasets.'), allow_html=True)
+
         return base.render('home/index.html', cache_force=True)
 
     def license(self):
