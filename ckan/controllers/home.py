@@ -111,6 +111,9 @@ class HomeController(base.BaseController):
             if msg:
                 h.flash_notice(msg, allow_html=True)
 
+            if len(h.organizations_available('read')) == 0:
+                h.flash_notice(_('You are not part of any organization. You must be member of an organization to submit or update datasets.'), allow_html=True)
+
         # START OF DIRTINESS
         def get_group(id):
             def _get_group_type(id):
