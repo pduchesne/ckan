@@ -1080,7 +1080,7 @@ def package_owner_org_update(context, data_dict):
 
     need_update = True
     for member_obj in members:
-        if org and member_obj.group_id == org.id:
+        if (org and member_obj.group_id == org.id) or member_obj.state == 'deleted':
             need_update = False
         else:
             member_obj.state = 'deleted'
