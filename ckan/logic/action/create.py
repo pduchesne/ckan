@@ -213,7 +213,9 @@ def package_create(context, data_dict):
     # Create default views for resources if necessary
     if data.get('resources'):
         logic.get_action('package_create_default_resource_views')(
-            context, {'package': data})
+            {'model': context['model'], 'user': context['user'],
+             'ignore_auth': True},
+            {'package': data})
 
     if not context.get('defer_commit'):
         model.repo.commit()
@@ -1093,7 +1095,7 @@ def user_invite(context, data_dict):
 
 def _get_random_username_from_email(email):
     localpart = email.split('@')[0]
-    cleaned_localpart = re.sub(r'[^\w]', '-', localpart)
+    cleaned_localpart = re.sub(r'[^\w]', '-', localpart).lower()
 
     # if we can't create a unique user name within this many attempts
     # then something else is probably wrong and we should give up
@@ -1407,6 +1409,9 @@ def _group_or_org_member_create(context, data_dict, is_org=False):
 
     schema = ckan.logic.schema.member_schema()
     data, errors = _validate(data_dict, schema, context)
+    if errors:
+        model.Session.rollback()
+        raise ValidationError(errors)
 
     username = _get_or_bust(data_dict, 'username')
     role = data_dict.get('role')

@@ -363,7 +363,9 @@ def package_update(context, data_dict):
     # Create default views for resources if necessary
     if data.get('resources'):
         logic.get_action('package_create_default_resource_views')(
-            context, {'package': data})
+            {'model': context['model'], 'user': context['user'],
+             'ignore_auth': True},
+            {'package': data})
 
     if not context.get('defer_commit'):
         model.repo.commit()
@@ -1219,16 +1221,16 @@ def _bulk_update_dataset(context, data_dict, update_dict):
     org_id = data_dict.get('org_id')
 
     model = context['model']
-
     model.Session.query(model.package_table) \
         .filter(model.Package.id.in_(datasets)) \
         .filter(model.Package.owner_org == org_id) \
         .update(update_dict, synchronize_session=False)
 
     # revisions
-    model.Session.query(model.package_table) \
-        .filter(model.Package.id.in_(datasets)) \
-        .filter(model.Package.owner_org == org_id) \
+    model.Session.query(model.package_revision_table) \
+        .filter(model.PackageRevision.id.in_(datasets)) \
+        .filter(model.PackageRevision.owner_org == org_id) \
+        .filter(model.PackageRevision.current is True) \
         .update(update_dict, synchronize_session=False)
 
     model.Session.commit()

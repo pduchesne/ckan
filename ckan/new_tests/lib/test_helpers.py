@@ -3,6 +3,8 @@ import nose
 import ckan.lib.helpers as h
 import ckan.exceptions
 
+from ckan.new_tests import helpers
+
 eq_ = nose.tools.eq_
 CkanUrlException = ckan.exceptions.CkanUrlException
 
@@ -56,8 +58,93 @@ class TestHelpers(object):
 
     def test_render_markdown_not_allow_html(self):
         data = '<h1>moo</h1>'
-        output = '<p>moo\n</p>'
+        output = '<p>moo</p>'
         eq_(h.render_markdown(data), output)
+
+    def test_render_markdown_auto_link_without_path(self):
+        data = 'http://example.com'
+        output = '<p><a href="http://example.com" target="_blank" rel="nofollow">http://example.com</a></p>'
+        eq_(h.render_markdown(data), output)
+
+    def test_render_markdown_auto_link(self):
+        data = 'https://example.com/page.html'
+        output = '<p><a href="https://example.com/page.html" target="_blank" rel="nofollow">https://example.com/page.html</a></p>'
+        eq_(h.render_markdown(data), output)
+
+    def test_render_markdown_auto_link_ignoring_trailing_punctuation(self):
+        data = 'My link: http://example.com/page.html.'
+        output = '<p>My link: <a href="http://example.com/page.html" target="_blank" rel="nofollow">http://example.com/page.html</a>.</p>'
+        eq_(h.render_markdown(data), output)
+
+
+class TestHelpersUrlFor(object):
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    def test_url_for_default(self):
+        url = '/dataset/my_dataset'
+        generated_url = h.url_for(controller='package', action='read', id='my_dataset')
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    def test_url_for_with_locale(self):
+        url = '/de/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  locale='de')
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    def test_url_for_not_qualified(self):
+        url = '/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  qualified=False)
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    def test_url_for_qualified(self):
+        url = 'http://example.com/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  qualified=True)
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    @helpers.change_config('ckan.root_path', '/my/prefix')
+    def test_url_for_qualified_with_root_path(self):
+        url = 'http://example.com/my/prefix/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  qualified=True)
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    def test_url_for_qualified_with_locale(self):
+        url = 'http://example.com/de/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  qualified=True,
+                                  locale='de')
+        eq_(generated_url, url)
+
+    @helpers.change_config('ckan.site_url', 'http://example.com')
+    @helpers.change_config('ckan.root_path', '/my/custom/path/{{LANG}}/foo')
+    def test_url_for_qualified_with_root_path_and_locale(self):
+        url = 'http://example.com/my/custom/path/de/foo/dataset/my_dataset'
+        generated_url = h.url_for(controller='package',
+                                  action='read',
+                                  id='my_dataset',
+                                  qualified=True,
+                                  locale='de')
+        eq_(generated_url, url)
+
+
+class TestHelpersRemoveLineBreaks(object):
 
     def test_remove_linebreaks_removes_linebreaks(self):
         test_string = 'foo\nbar\nbaz'
@@ -66,28 +153,32 @@ class TestHelpers(object):
         assert result.find('\n') == -1,\
             '"remove_linebreaks" should remove line breaks'
 
-    def test_remove_linebreaks_casts_into_str(self):
-        class StringLike(str):
+    def test_remove_linebreaks_casts_into_unicode(self):
+        class UnicodeLike(unicode):
             pass
 
-        test_string = StringLike('foo')
+        test_string = UnicodeLike('foo')
         result = h.remove_linebreaks(test_string)
 
-        strType = ''.__class__
+        strType = u''.__class__
         assert result.__class__ == strType,\
-            '"remove_linebreaks" casts into str()'
+            '"remove_linebreaks" casts into unicode()'
 
-    def test_render_markdown_auto_link_without_path(self):
-        data = 'http://example.com'
-        output = '<p><a href="http://example.com" target="_blank" rel="nofollow">http://example.com</a>\n</p>'
-        eq_(h.render_markdown(data), output)
 
-    def test_render_markdown_auto_link(self):
-        data = 'https://example.com/page.html'
-        output = '<p><a href="https://example.com/page.html" target="_blank" rel="nofollow">https://example.com/page.html</a>\n</p>'
-        eq_(h.render_markdown(data), output)
+class TestLicenseOptions(object):
+    def test_includes_existing_license(self):
+        licenses = h.license_options('some-old-license')
+        eq_(dict(licenses)['some-old-license'], 'some-old-license')
+        # and it is first on the list
+        eq_(licenses[0][0], 'some-old-license')
 
-    def test_render_markdown_auto_link_ignoring_trailing_punctuation(self):
-        data = 'My link: http://example.com/page.html.'
-        output = '<p>My link: <a href="http://example.com/page.html" target="_blank" rel="nofollow">http://example.com/page.html</a>.\n</p>'
-        eq_(h.render_markdown(data), output)
+
+class TestResourceFormat(object):
+
+    def test_autodetect_tsv(self):
+
+        eq_(h.unified_resource_format('tsv'), 'TSV')
+
+        eq_(h.unified_resource_format('text/tab-separated-values'), 'TSV')
+
+        eq_(h.unified_resource_format('text/tsv'), 'TSV')
