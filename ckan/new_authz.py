@@ -117,7 +117,7 @@ def _get_user(username):
     try:
         if c.userobj and c.userobj.name == username:
             return c.userobj
-    except TypeError:
+    except Exception:
         # c is not available
         pass
     # Get user from the DB
