@@ -367,9 +367,22 @@ def _group_or_org_list(context, data_dict, is_org=False):
     groups = data_dict.get('groups')
     group_type = data_dict.get('type', 'group')
     ref_group_by = 'id' if api == 2 else 'name'
-
-    sort = data_dict.get('sort', 'name')
+    pagination_dict = {}
+    limit = data_dict.get('limit')
+    if limit:
+        pagination_dict['limit'] = data_dict['limit']
+    offset = data_dict.get('offset')
+    if offset:
+        pagination_dict['offset'] = data_dict['offset']
+    if pagination_dict:
+        pagination_dict, errors = _validate(
+            data_dict, logic.schema.default_pagination_schema(), context)
+        if errors:
+            raise ValidationError(errors)
+    sort = data_dict.get('sort') or 'name'
     q = data_dict.get('q')
+
+    all_fields = asbool(data_dict.get('all_fields', None))
 
     # order_by deprecated in ckan 1.8
     # if it is supplied and sort isn't use order_by and raise a warning
@@ -389,16 +402,21 @@ def _group_or_org_list(context, data_dict, is_org=False):
                                                'package_count', 'title'],
                                total=1)
 
-    all_fields = data_dict.get('all_fields', None)
-    include_extras = all_fields and \
-                     asbool(data_dict.get('include_extras', False))
+    if sort_info and sort_info[0][0] == 'package_count':
+        query = model.Session.query(model.Group.id,
+                                    model.Group.name,
+                                    sqlalchemy.func.count(model.Group.id))
 
-    query = model.Session.query(model.Group)
-    if include_extras:
-        # this does an eager load of the extras, avoiding an sql query every
-        # time group_list_dictize accesses a group's extra.
-        query = query.options(sqlalchemy.orm.joinedload(model.Group._extras))
+        query = query.filter(model.Member.group_id == model.Group.id) \
+                     .filter(model.Member.table_id == model.Package.id) \
+                     .filter(model.Member.table_name == 'package') \
+                     .filter(model.Package.state == 'active')
+    else:
+        query = model.Session.query(model.Group.id,
+                                    model.Group.name)
+
     query = query.filter(model.Group.state == 'active')
+
     if groups:
         query = query.filter(model.Group.name.in_(groups))
     if q:
@@ -412,21 +430,42 @@ def _group_or_org_list(context, data_dict, is_org=False):
     query = query.filter(model.Group.is_organization == is_org)
     if not is_org:
         query = query.filter(model.Group.type == group_type)
+    if sort_info:
+        sort_field = sort_info[0][0]
+        sort_direction = sort_info[0][1]
+        if sort_field == 'package_count':
+            query = query.group_by(model.Group.id, model.Group.name)
+            sort_model_field = sqlalchemy.func.count(model.Group.id)
+        elif sort_field == 'name':
+            sort_model_field = model.Group.name
+        elif sort_field == 'title':
+            sort_model_field = model.Group.title
+
+        if sort_direction == 'asc':
+            query = query.order_by(sqlalchemy.asc(sort_model_field))
+        else:
+            query = query.order_by(sqlalchemy.desc(sort_model_field))
+
+    if limit:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
 
     groups = query.all()
 
-    action = 'organization_show' if is_org else 'group_show'
+    if all_fields:
+        action = 'organization_show' if is_org else 'group_show'
+        group_list = []
+        for group in groups:
+            data_dict['id'] = group.id
+            for key in ('include_extras', 'include_tags', 'include_users',
+                        'include_groups', 'include_followers'):
+                if key not in data_dict:
+                    data_dict[key] = False
 
-    group_list = []
-    for group in groups:
-        data_dict['id'] = group.id
-        group_list.append(logic.get_action(action)(context, data_dict))
-
-    group_list = sorted(group_list, key=lambda x: x[sort_info[0][0]],
-        reverse=sort_info[0][1] == 'desc')
-
-    if not all_fields:
-        group_list = [group[ref_group_by] for group in group_list]
+            group_list.append(logic.get_action(action)(context, data_dict))
+    else:
+        group_list = [getattr(group, ref_group_by) for group in groups]
 
     return group_list
 
@@ -441,6 +480,13 @@ def group_list(context, data_dict):
         "name asc" string of field name and sort-order. The allowed fields are
         'name', 'package_count' and 'title'
     :type sort: string
+    :param limit: if given, the list of groups will be broken into pages of
+        at most ``limit`` groups per page and only one page will be returned
+        at a time (optional)
+    :type limit: int
+    :param offset: when ``limit`` is given, the offset to start
+        returning groups from
+    :type offset: int
     :param groups: a list of names of the groups to return, if given only
         groups whose names are in this list will be returned (optional)
     :type groups: list of strings
@@ -460,6 +506,10 @@ def group_list(context, data_dict):
     :param include_groups: if all_fields, include the groups the groups are in
         (optional, default: ``False``).
     :type include_groups: boolean
+    :param include_users: if all_fields, include the group users
+        (optional, default: ``False``).
+    :type include_users: boolean
+
 
     :rtype: list of strings
 
@@ -478,6 +528,13 @@ def organization_list(context, data_dict):
         "name asc" string of field name and sort-order. The allowed fields are
         'name', 'package_count' and 'title'
     :type sort: string
+    :param limit: if given, the list of organizations will be broken into pages
+        of at most ``limit`` organizations per page and only one page will be
+        returned at a time (optional)
+    :type limit: int
+    :param offset: when ``limit`` is given, the offset to start
+        returning organizations from
+    :type offset: int
     :param organizations: a list of names of the groups to return,
         if given only groups whose names are in this list will be
         returned (optional)
@@ -489,15 +546,19 @@ def organization_list(context, data_dict):
         packages in the `package_count` property.
         (optional, default: ``False``)
     :type all_fields: boolean
-    :param include_extras: if all_fields, include the group extra fields
+    :param include_extras: if all_fields, include the organization extra fields
         (optional, default: ``False``)
     :type include_extras: boolean
-    :param include_tags: if all_fields, include the group tags
+    :param include_tags: if all_fields, include the organization tags
         (optional, default: ``False``)
     :type include_tags: boolean
-    :param include_groups: if all_fields, include the groups the groups are in
+    :param include_groups: if all_fields, include the organizations the
+        organizations are in
         (optional, default: ``False``)
     :type all_fields: boolean
+    :param include_users: if all_fields, include the organization users
+        (optional, default: ``False``).
+    :type include_users: boolean
 
     :rtype: list of strings
 
@@ -1155,6 +1216,12 @@ def _group_or_org_show(context, data_dict, is_org=False):
     include_datasets = asbool(data_dict.get('include_datasets', False))
     packages_field = 'datasets' if include_datasets else 'dataset_count'
 
+    include_tags = asbool(data_dict.get('include_tags', True))
+    include_users = asbool(data_dict.get('include_users', True))
+    include_groups = asbool(data_dict.get('include_groups', True))
+    include_extras = asbool(data_dict.get('include_extras', True))
+    include_followers = asbool(data_dict.get('include_followers', True))
+
     if group is None:
         raise NotFound
     if is_org and not group.is_organization:
@@ -1168,7 +1235,11 @@ def _group_or_org_show(context, data_dict, is_org=False):
         _check_access('group_show', context, data_dict)
 
     group_dict = model_dictize.group_dictize(group, context,
-                                             packages_field=packages_field)
+                                             packages_field=packages_field,
+                                             include_tags=include_tags,
+                                             include_extras=include_extras,
+                                             include_groups=include_groups,
+                                             include_users=include_users,)
 
     if is_org:
         plugin_type = plugins.IOrganizationController
@@ -1187,9 +1258,12 @@ def _group_or_org_show(context, data_dict, is_org=False):
     except AttributeError:
         schema = group_plugin.db_to_form_schema()
 
-    group_dict['num_followers'] = logic.get_action('group_follower_count')(
-        {'model': model, 'session': model.Session},
-        {'id': group_dict['id']})
+    if include_followers:
+        group_dict['num_followers'] = logic.get_action('group_follower_count')(
+            {'model': model, 'session': model.Session},
+            {'id': group_dict['id']})
+    else:
+        group_dict['num_followers'] = 0
 
     if schema is None:
         schema = logic.schema.default_show_group_schema()
@@ -1206,6 +1280,21 @@ def group_show(context, data_dict):
     :type id: string
     :param include_datasets: include a list of the group's datasets
          (optional, default: ``False``)
+    :type id: boolean
+    :param include_extras: include the group's extra fields
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_users: include the group's users
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_groups: include the group's sub groups
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_tags: include the group's tags
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_followers: include the group's number of followers
+         (optional, default: ``True``)
     :type id: boolean
 
     :rtype: dictionary
@@ -1224,6 +1313,22 @@ def organization_show(context, data_dict):
     :param include_datasets: include a list of the organization's datasets
          (optional, default: ``False``)
     :type id: boolean
+    :param include_extras: include the organization's extra fields
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_users: include the organization's users
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_groups: include the organization's sub groups
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_tags: include the organization's tags
+         (optional, default: ``True``)
+    :type id: boolean
+    :param include_followers: include the organization's number of followers
+         (optional, default: ``True``)
+    :type id: boolean
+
 
     :rtype: dictionary
 
@@ -1632,6 +1737,10 @@ def package_search(context, data_dict):
         sysadmin will be returned all draft datasets. Optional, the default is
         ``False``.
     :type include_drafts: boolean
+    :param use_default_schema: use default package schema instead of
+        a custom schema defined with an IDatasetForm plugin (default: False)
+    :type use_default_schema: bool
+
 
     The following advanced Solr parameters are supported as well. Note that
     some of these are only available on particular Solr versions. See Solr's
@@ -1671,9 +1780,6 @@ def package_search(context, data_dict):
         "count", "display_name" and "name" entries.  The display_name is a
         form of the name that can be used in titles.
     :type search_facets: nested dict of dicts.
-    :param use_default_schema: use default package schema instead of
-        a custom schema defined with an IDatasetForm plugin (default: False)
-    :type use_default_schema: bool
 
     An example result: ::
 
@@ -1712,7 +1818,7 @@ def package_search(context, data_dict):
 
     model = context['model']
     session = context['session']
-    user = context['user']
+    user = context.get('user')
 
     _check_access('package_search', context, data_dict)
 
@@ -1735,7 +1841,11 @@ def package_search(context, data_dict):
 
     results = []
     if not abort:
-        data_source = 'data_dict' if data_dict.get('use_default_schema') else 'validated_data_dict'
+        if asbool(data_dict.get('use_default_schema')):
+            data_source = 'data_dict'
+        else:
+            data_source = 'validated_data_dict'
+        data_dict.pop('use_default_schema', None)
         # return a list of package ids
         data_dict['fl'] = 'id {0}'.format(data_source)
 
@@ -1744,9 +1854,8 @@ def package_search(context, data_dict):
         # instead set it to only retrieve public datasets
         fq = data_dict.get('fq', '')
         if not context.get('ignore_capacity_check', False):
-            fq = ' '.join(p for p in fq.split(' ')
-                          if 'capacity:' not in p)
-            data_dict['fq'] = fq + ' capacity:"public"'
+            fq = ' '.join(p for p in fq.split() if 'capacity:' not in p)
+            data_dict['fq'] = 'capacity:"public" ' + fq
 
         # Solr doesn't need 'include_drafts`, so pop it.
         include_drafts = data_dict.pop('include_drafts', False)
@@ -1754,15 +1863,15 @@ def package_search(context, data_dict):
         if include_drafts:
             user_id = authz.get_user_id_for_username(user, allow_none=True)
             if authz.is_sysadmin(user):
-                data_dict['fq'] = fq + ' +state:(active OR draft)'
+                data_dict['fq'] = '+state:(active OR draft) ' + fq
             elif user_id:
                 # Query to return all active datasets, and all draft datasets
                 # for this user.
-                data_dict['fq'] = fq + \
-                    ' ((creator_user_id:{0} AND +state:(draft OR active))' \
-                    ' OR state:active)'.format(user_id)
+                u_fq = ' ((creator_user_id:{0} AND +state:(draft OR active))' \
+                       ' OR state:active) '.format(user_id)
+                data_dict['fq'] = u_fq + ' ' + fq
         elif not authz.is_sysadmin(user):
-            data_dict['fq'] = fq + ' +state:active'
+            data_dict['fq'] = '+state:active ' + fq
 
         # Pop these ones as Solr does not need them
         extras = data_dict.pop('extras', None)
@@ -3301,11 +3410,13 @@ def dashboard_activity_list_html(context, data_dict):
     '''
     activity_stream = dashboard_activity_list(context, data_dict)
     model = context['model']
+    user_id = context['user']
     offset = data_dict.get('offset', 0)
     extra_vars = {
         'controller': 'user',
         'action': 'dashboard',
         'offset': offset,
+        'id': user_id
     }
     return activity_streams.activity_list_to_html(context, activity_stream,
                                                   extra_vars)

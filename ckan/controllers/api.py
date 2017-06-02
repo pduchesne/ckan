@@ -193,6 +193,10 @@ class ApiController(base.BaseController):
         # if callback is specified we do not want to send that to the search
         if 'callback' in request_data:
             del request_data['callback']
+            c.user = None
+            c.userobj = None
+            context['user'] = None
+            context['auth_user_obj'] = None
         try:
             result = function(context, request_data)
             return_dict['success'] = True
@@ -730,7 +734,8 @@ class ApiController(base.BaseController):
         return self._finish_ok(resultSet)
 
     def tag_autocomplete(self):
-        q = request.params.get('incomplete', '')
+        q = request.str_params.get('incomplete', '')
+        q = unicode(urllib.unquote(q), 'utf-8')
         limit = request.params.get('limit', 10)
         tag_names = []
         if q:

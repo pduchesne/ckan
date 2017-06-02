@@ -188,6 +188,8 @@ class FunctionalTestBase(object):
         '''Reset the database and clear the search indexes.'''
         reset_db()
         search.clear()
+        if hasattr(self, '_test_app'):
+            self._test_app.reset()
 
     @classmethod
     def teardown_class(cls):

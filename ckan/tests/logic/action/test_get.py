@@ -8,6 +8,7 @@ import ckan.logic.schema as schema
 
 
 eq = nose.tools.eq_
+assert_raises = nose.tools.assert_raises
 
 
 class TestPackageShow(helpers.FunctionalTestBase):
@@ -111,7 +112,7 @@ class TestGroupList(helpers.FunctionalTestBase):
 
         eq(group_list, ['bb', 'aa'])
 
-    def assert_equals_expected(self, expected_dict, result_dict):
+    def eq_expected(self, expected_dict, result_dict):
         superfluous_keys = set(result_dict) - set(expected_dict)
         assert not superfluous_keys, 'Did not expect key: %s' % \
             ' '.join(('%s=%s' % (k, result_dict[k]) for k in superfluous_keys))
@@ -128,8 +129,6 @@ class TestGroupList(helpers.FunctionalTestBase):
 
         expected_group = dict(group.items()[:])
         for field in ('users', 'tags', 'extras', 'groups'):
-            if field in group_list[0]:
-                del group_list[0][field]
             del expected_group[field]
 
         assert group_list[0] == expected_group
@@ -148,6 +147,17 @@ class TestGroupList(helpers.FunctionalTestBase):
 
         eq(group_list[0]['extras'], group['extras'])
         eq(group_list[0]['extras'][0]['key'], 'key1')
+
+    def test_group_list_users_returned(self):
+        user = factories.User()
+        group = factories.Group(users=[{'name': user['name'],
+                                        'capacity': 'admin'}])
+
+        group_list = helpers.call_action('group_list', all_fields=True,
+                                         include_users=True)
+
+        eq(group_list[0]['users'], group['users'])
+        eq(group_list[0]['users'][0]['name'], group['users'][0]['name'])
 
     # NB there is no test_group_list_tags_returned because tags are not in the
     # group_create schema (yet)
@@ -169,6 +179,49 @@ class TestGroupList(helpers.FunctionalTestBase):
         expected_parent_group = dict(parent_group.items()[:])
 
         eq([g['name'] for g in child_group_returned['groups']], [expected_parent_group['name']])
+
+    def test_group_list_limit(self):
+
+        group1 = factories.Group()
+        group2 = factories.Group()
+        group3 = factories.Group()
+
+        group_list = helpers.call_action('group_list', limit=1)
+
+        eq(len(group_list), 1)
+        eq(group_list[0], group1['name'])
+
+    def test_group_list_offset(self):
+
+        group1 = factories.Group()
+        group2 = factories.Group()
+        group3 = factories.Group()
+
+        group_list = helpers.call_action('group_list', offset=2)
+
+        eq(len(group_list), 1)
+        eq(group_list[0], group3['name'])
+
+    def test_group_list_limit_and_offset(self):
+
+        group1 = factories.Group()
+        group2 = factories.Group()
+        group3 = factories.Group()
+
+        group_list = helpers.call_action('group_list', offset=1, limit=1)
+
+        eq(len(group_list), 1)
+        eq(group_list[0], group2['name'])
+
+    def test_group_list_wrong_limit(self):
+
+        assert_raises(logic.ValidationError, helpers.call_action, 'group_list',
+                      limit='a')
+
+    def test_group_list_wrong_offset(self):
+
+        assert_raises(logic.ValidationError, helpers.call_action, 'group_list',
+                      offset='-2')
 
 
 class TestGroupShow(helpers.FunctionalTestBase):
@@ -1072,6 +1125,13 @@ class TestPackageSearch(helpers.FunctionalTestBase):
         eq(len(results), 1)
         eq(results[0]['name'], private_dataset['name'])
 
+    def test_package_works_without_user_in_context(self):
+        '''
+        package_search() should work even if user isn't in the context (e.g.
+        ckanext-showcase tests.
+        '''
+        logic.get_action('package_search')({}, dict(q='anything'))
+
 
 class TestBadLimitQueryParameters(helpers.FunctionalTestBase):
     '''test class for #1258 non-int query parameters cause 500 errors
@@ -1642,3 +1702,116 @@ class TestTagList(helpers.FunctionalTestBase):
         nose.tools.assert_raises(
             logic.NotFound,
             helpers.call_action, 'tag_list', vocabulary_id='does-not-exist')
+
+
+class TestMembersList():
+
+    def setup(self):
+        helpers.reset_db()
+
+    def test_dataset_delete_marks_membership_of_group_as_deleted(self):
+        sysadmin = factories.Sysadmin()
+        group = factories.Group()
+        dataset = factories.Dataset(groups=[{'name': group['name']}])
+        context = {'user': sysadmin['name']}
+
+        group_members = helpers.call_action('member_list', context,
+                                            id=group['id'],
+                                            object_type='package')
+
+        eq(len(group_members), 1)
+        eq(group_members[0][0], dataset['id'])
+        eq(group_members[0][1], 'package')
+
+        helpers.call_action('package_delete', context, id=dataset['id'])
+
+        group_members = helpers.call_action('member_list', context,
+                                            id=group['id'],
+                                            object_type='package')
+
+        eq(len(group_members), 0)
+
+    def test_dataset_delete_marks_membership_of_org_as_deleted(self):
+        sysadmin = factories.Sysadmin()
+        org = factories.Organization()
+        dataset = factories.Dataset(owner_org=org['id'])
+        context = {'user': sysadmin['name']}
+
+        org_members = helpers.call_action('member_list', context,
+                                          id=org['id'],
+                                          object_type='package')
+
+        eq(len(org_members), 1)
+        eq(org_members[0][0], dataset['id'])
+        eq(org_members[0][1], 'package')
+
+        helpers.call_action('package_delete', context, id=dataset['id'])
+
+        org_members = helpers.call_action('member_list', context,
+                                          id=org['id'],
+                                          object_type='package')
+
+        eq(len(org_members), 0)
+
+    def test_user_delete_marks_membership_of_group_as_deleted(self):
+        sysadmin = factories.Sysadmin()
+        group = factories.Group()
+        user = factories.User()
+        context = {'user': sysadmin['name']}
+
+        member_dict = {
+            'username': user['id'],
+            'id': group['id'],
+            'role': 'member'
+        }
+        helpers.call_action('group_member_create', context, **member_dict)
+
+        group_members = helpers.call_action('member_list', context,
+                                            id=group['id'],
+                                            object_type='user',
+                                            capacity='member')
+
+        eq(len(group_members), 1)
+        eq(group_members[0][0], user['id'])
+        eq(group_members[0][1], 'user')
+
+        helpers.call_action('user_delete', context, id=user['id'])
+
+        group_members = helpers.call_action('member_list', context,
+                                            id=group['id'],
+                                            object_type='user',
+                                            capacity='member')
+
+        eq(len(group_members), 0)
+
+    def test_user_delete_marks_membership_of_org_as_deleted(self):
+        sysadmin = factories.Sysadmin()
+        org = factories.Organization()
+        user = factories.User()
+        context = {'user': sysadmin['name']}
+
+        member_dict = {
+            'username': user['id'],
+            'id': org['id'],
+            'role': 'member'
+        }
+        helpers.call_action('organization_member_create', context,
+                            **member_dict)
+
+        org_members = helpers.call_action('member_list', context,
+                                          id=org['id'],
+                                          object_type='user',
+                                          capacity='member')
+
+        eq(len(org_members), 1)
+        eq(org_members[0][0], user['id'])
+        eq(org_members[0][1], 'user')
+
+        helpers.call_action('user_delete', context, id=user['id'])
+
+        org_members = helpers.call_action('member_list', context,
+                                          id=org['id'],
+                                          object_type='user',
+                                          capacity='member')
+
+        eq(len(org_members), 0)

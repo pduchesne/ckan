@@ -150,15 +150,15 @@ class GroupController(base.BaseController):
     def index(self):
         group_type = self._guess_group_type()
 
+        page = self._get_page_number(request.params) or 1
+        items_per_page = 21
+
         context = {'model': model, 'session': model.Session,
                    'user': c.user or c.author, 'for_view': True,
                    'with_private': False}
 
         q = c.q = request.params.get('q', '')
-        data_dict = {'all_fields': True, 'q': q, 'type': group_type or 'group'}
         sort_by = c.sort_by_selected = request.params.get('sort')
-        if sort_by:
-            data_dict['sort'] = sort_by
         try:
             self._check_access('site_read', context)
         except NotAuthorized:
@@ -170,14 +170,34 @@ class GroupController(base.BaseController):
             context['user_id'] = c.userobj.id
             context['user_is_admin'] = c.userobj.sysadmin
 
-        results = self._action('group_list')(context, data_dict)
+        data_dict_global_results = {
+            'all_fields': False,
+            'q': q,
+            'sort': sort_by,
+            'type': group_type or 'group',
+        }
+        global_results = self._action('group_list')(context,
+                                                    data_dict_global_results)
+
+        data_dict_page_results = {
+            'all_fields': True,
+            'q': q,
+            'sort': sort_by,
+            'type': group_type or 'group',
+            'limit': items_per_page,
+            'offset': items_per_page * (page - 1),
+        }
+        page_results = self._action('group_list')(context,
+                                                  data_dict_page_results)
 
         c.page = h.Page(
-            collection=results,
-            page = self._get_page_number(request.params),
+            collection=global_results,
+            page=page,
             url=h.pager_url,
-            items_per_page=21
+            items_per_page=items_per_page,
         )
+
+        c.page.items = page_results
         return render(self._index_template(group_type),
                       extra_vars={'group_type': group_type})
 
@@ -255,8 +275,9 @@ class GroupController(base.BaseController):
         c.drill_down_url = drill_down_url
 
         def remove_field(key, value=None, replace=None):
+            controller = lookup_group_controller(group_type)
             return h.remove_url_param(key, value=value, replace=replace,
-                                      controller='group', action='read',
+                                      controller=controller, action='read',
                                       extras=dict(id=c.group_dict.get('name')))
 
         c.remove_field = remove_field
@@ -268,6 +289,7 @@ class GroupController(base.BaseController):
 
         try:
             c.fields = []
+            c.fields_grouped = {}
             search_extras = {}
             for (param, value) in request.params.items():
                 if not param in ['q', 'page', 'sort'] \
@@ -275,6 +297,10 @@ class GroupController(base.BaseController):
                     if not param.startswith('ext_'):
                         c.fields.append((param, value))
                         q += ' %s: "%s"' % (param, value)
+                        if param not in c.fields_grouped:
+                            c.fields_grouped[param] = [value]
+                        else:
+                            c.fields_grouped[param].append(value)
                     else:
                         search_extras[param] = value
 
@@ -625,9 +651,9 @@ class GroupController(base.BaseController):
         try:
             if request.method == 'POST':
                 self._action('group_delete')(context, {'id': id})
-                if self.group_type == 'organization':
+                if group_type == 'organization':
                     h.flash_notice(_('Organization has been deleted.'))
-                elif self.group_type == 'group':
+                elif group_type == 'group':
                     h.flash_notice(_('Group has been deleted.'))
                 else:
                     h.flash_notice(_('%s has been deleted.')

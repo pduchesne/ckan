@@ -892,12 +892,9 @@ class UserCmd(CkanCommand):
             return
         username = self.args[1]
 
-        user = model.User.by_name(unicode(username))
-        if not user:
-            print 'Error: user "%s" not found!' % username
-            return
-        user.delete()
-        model.repo.commit_and_remove()
+        p.toolkit.get_action('user_delete')(
+            {'model': model, 'ignore_auth': True},
+            {'id': username})
         print('Deleted user: %s' % username)
 
 
@@ -2417,10 +2414,6 @@ Not used when using the `-d` option.''')
 
         if not search_data_dict.get('q'):
             search_data_dict['q'] = '*:*'
-
-        if ('dataset_type:dataset' not in search_data_dict['fq'] and
-                'dataset_type:dataset' not in search_data_dict['fq_list']):
-            search_data_dict['fq_list'].append('dataset_type:dataset')
 
         query = p.toolkit.get_action('package_search')(
             {'ignore_capacity_check': True},

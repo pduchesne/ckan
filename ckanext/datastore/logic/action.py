@@ -139,7 +139,7 @@ def datastore_create(context, data_dict):
     try:
         result = db.create(context, data_dict)
     except db.InvalidDataError as err:
-        raise p.toolkit.ValidationError(str(err))
+        raise p.toolkit.ValidationError(unicode(err))
 
     result.pop('id', None)
     result.pop('private', None)
@@ -301,10 +301,20 @@ def datastore_delete(context, data_dict):
 
     '''
     schema = context.get('schema', dsschema.datastore_upsert_schema())
+
+    # Remove any applied filters before running validation.
     filters = data_dict.pop('filters', None)
     data_dict, errors = _validate(data_dict, schema, context)
-    if filters:
+
+    if filters is not None:
+        if not isinstance(filters, dict):
+            raise p.toolkit.ValidationError({
+                'filters': [
+                    'filters must be either a dict or null.'
+                ]
+            })
         data_dict['filters'] = filters
+
     if errors:
         raise p.toolkit.ValidationError(errors)
 
