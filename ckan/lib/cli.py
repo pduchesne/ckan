@@ -985,7 +985,8 @@ class DatasetCmd(CkanCommand):
         import ckan.model as model
 
         conn = model.Session.connection()
-
+        if (arg == 'do_clean'):
+            print 'CLEANING all stale datasets'
         sql = '''
                 SELECT DISTINCT p.id,
                        ( SELECT bool_or(ho.current) FROM harvest_object AS ho WHERE ho.package_id = p.id GROUP BY ho.package_id) AS isCurrent
