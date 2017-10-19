@@ -930,6 +930,8 @@ class DatasetCmd(CkanCommand):
                 self.delete(self.args[1])
             elif cmd == 'purge':
                 self.purge(self.args[1])
+            elif cmd == 'clean':
+                self.clean(len(self.args) > 1 and self.args[1])
             elif cmd == 'list':
                 self.list()
             elif cmd == 'show':
@@ -978,6 +980,25 @@ class DatasetCmd(CkanCommand):
         dataset.purge()
         model.repo.commit_and_remove()
         print '%s purged' % name
+
+    def clean(self, arg):
+        import ckan.model as model
+
+        conn = model.Session.connection()
+
+        sql = '''
+                SELECT DISTINCT p.id,
+                       ( SELECT bool_or(ho.current) FROM harvest_object AS ho WHERE ho.package_id = p.id GROUP BY ho.package_id) AS isCurrent
+                   FROM package AS p
+                   LEFT OUTER JOIN harvest_object AS ho ON ho.package_id = p.id
+            '''
+        for t in conn.execute(sql).fetchall():
+            if (t[1] == False):
+                print '%s in stale state' % t[0]
+                if (arg == 'do_clean'):
+                    dataset = self._get_dataset(t[0])
+                    dataset.purge()
+                    model.repo.commit_and_remove()
 
 
 class Celery(CkanCommand):
