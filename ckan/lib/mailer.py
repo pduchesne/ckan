@@ -29,6 +29,12 @@ class MailerException(Exception):
 def _mail_recipient(recipient_name, recipient_email,
                     sender_name, sender_url, subject,
                     body, headers={}):
+    _mail_recipients([(recipient_name, recipient_email)], sender_name, sender_url, subject, body, headers)
+
+# recipients : array of pairs (recipient_name, recipient_email)
+def _mail_recipients(recipients,
+                     sender_name, sender_url, subject,
+                     body, headers={}):
     mail_from = config.get('smtp.mail_from')
     msg = MIMEText(body.encode('utf-8'), 'plain', 'utf-8')
     for k, v in headers.items():
@@ -39,8 +45,7 @@ def _mail_recipient(recipient_name, recipient_email,
     subject = Header(subject.encode('utf-8'), 'utf-8')
     msg['Subject'] = subject
     msg['From'] = _("%s <%s>") % (sender_name, mail_from)
-    recipient = u"%s <%s>" % (recipient_name, recipient_email)
-    msg['To'] = Header(recipient, 'utf-8')
+    msg['To'] = Header(','.join([u"%s <%s>" % recipient for recipient in recipients]), 'utf-8')
     msg['Date'] = Utils.formatdate(time())
     msg['X-Mailer'] = "CKAN %s" % ckan.__version__
 
@@ -86,8 +91,9 @@ def _mail_recipient(recipient_name, recipient_email,
                                    "smtp.password must be configured as well.")
             smtp_connection.login(smtp_user, smtp_password)
 
-        smtp_connection.sendmail(mail_from, [recipient_email], msg.as_string())
-        log.info("Sent email to {0}".format(recipient_email))
+        emails = [recipient[1] for recipient in recipients]
+        smtp_connection.sendmail(mail_from, emails, msg.as_string())
+        log.info("Sent email to {0}".format(','.join(emails)))
 
     except smtplib.SMTPException, e:
         msg = '%r' % e
