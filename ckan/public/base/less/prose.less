@@ -45,12 +45,12 @@ h1, h2, h3, h4 {
 
 .table-striped {
   tbody {
-    tr:nth-child(odd) td,
-    tr:nth-child(odd) th {
-      background-color: transparent;
-    }
     tr:nth-child(even) td,
     tr:nth-child(even) th {
+      background-color: transparent;
+    }
+    tr:nth-child(odd) td,
+    tr:nth-child(odd) th {
       background-color: @chunkyTableStripeBackgroundColor;
     }
   }

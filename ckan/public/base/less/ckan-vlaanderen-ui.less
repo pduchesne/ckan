@@ -1,0 +1,61 @@
+/* Custom CSS for opendata.vlaanderen that includes only the bits of the default CKAN styling
+   required for use with ckanext-odvl
+   WARN : This LESS file is not included in the global ckan build,
+   it has to be compiled manually to ../css
+*/
+
+@import "../vendor/bootstrap/less/variables.less"; // Modify this for custom colors, font-sizes, etc
+@import "../vendor/bootstrap/less/mixins.less";
+
+// Components: Nav
+@import "../vendor/bootstrap/less/navs.less";
+//@import "../vendor/bootstrap/less/navbar.less";
+
+
+@import "../vendor/bootstrap/less/modals.less";
+@import "../vendor/bootstrap/less/utilities.less";
+
+
+@import "variables.less";
+@import "custom.less";
+@import "mixins.less";
+//@import "module.less";
+@import "media.less";
+//@import "nav.less";
+//@import "forms.less";
+//@import "dataset.less";
+@import "search.less";
+//@import "group.less";
+//@import "toolbar.less";
+//@import "prose.less";
+@import "icons.less";
+@import "layout.less";
+//@import "homepage.less";
+//@import "masthead.less";
+//@import "footer.less";
+@import "tables.less";
+//@import "profile.less";
+@import "activity.less";
+//@import "dropdown.less";
+//@import "dashboard.less";
+//@import "resource-view.less";
+//@import "datapusher.less";
+//
+//
+//@import "iehacks.less";
+
+.activity .item .icon {
+  position: relative;
+  float: left;
+}
+
+.activity .item .actor .gravatar {
+  position: relative;
+  top: 0;
+  left: 0px;
+  vertical-align: middle;
+}
+
+.media-item img {
+  max-width: 100%;
+}
