@@ -943,11 +943,11 @@ def check_access(action, data_dict=None):
     return authorized
 
 
-@core_helper
 @maintain.deprecated("helpers.get_action() is deprecated and will be removed "
                      "in a future version of CKAN. Instead, please use the "
                      "extra_vars param to render() in your controller to pass "
                      "results from action functions to your templates.")
+@core_helper
 def get_action(action_name, data_dict=None):
     '''Calls an action function from a template. Deprecated in CKAN 2.3.'''
     if data_dict is None:
