@@ -118,7 +118,7 @@
                   {% for package in c.most_viewed_packages %}
                       <tr py:for="package in c.most_viewed_packages">
                           <td>{{ h.link_to(package.title or package.name, h.url_for(controller='package', action='read', id=package.name)) }}</td>
-                          <td class="metric">{{ package.tracking_summary.total }}</td>
+                          <td class="metric">{{ package.tracking_summary.total if package.tracking_summary}}</td>
                       </tr>
                   {% endfor %}
                   </tbody>
