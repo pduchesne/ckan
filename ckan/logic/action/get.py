@@ -1887,10 +1887,12 @@ def package_search(context, data_dict):
         include_private = asbool(data_dict.pop('include_private', False))
         include_drafts = asbool(data_dict.pop('include_drafts', False))
         data_dict.setdefault('fq', '')
+        fq_list = data_dict.get('fq_list', [])
         if not include_private:
-            data_dict['fq'] = '+capacity:public ' + data_dict['fq']
+            fq_list.append('+capacity:public')
         if include_drafts:
-            data_dict['fq'] += ' +state:(active OR draft)'
+            fq_list.append('+state:(active OR draft)')
+        data_dict['fq_list'] = fq_list
 
         # Pop these ones as Solr does not need them
         extras = data_dict.pop('extras', None)
