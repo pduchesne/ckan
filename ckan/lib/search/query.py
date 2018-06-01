@@ -252,11 +252,13 @@ class PackageSearchQuery(SearchQuery):
         Return a list of the IDs of all indexed packages.
         """
         query = "*:*"
-        fq = "+site_id:\"%s\" " % config.get('ckan.site_id')
-        fq += "+state:active "
+        fq_list = [
+            "+site_id:\"%s\"" % config.get('ckan.site_id'),
+            "+state:active"
+        ]
 
         conn = make_connection()
-        data = conn.search(query, fq=fq, rows=max_results, fields='id')
+        data = conn.search(query, fq_list=fq_list, rows=max_results, fields='id')
         return [r.get('id') for r in data.docs]
 
     def get_index(self,reference):

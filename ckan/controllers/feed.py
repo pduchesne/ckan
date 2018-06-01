@@ -312,20 +312,20 @@ class FeedController(base.BaseController):
     # TODO check search params
     def custom(self):
         q = request.params.get('q', u'')
-        fq = ''
+        fq_list = []
         search_params = {}
         for (param, value) in request.params.items():
             if param not in ['q', 'page', 'sort'] \
                     and len(value) and not param.startswith('_'):
                 search_params[param] = value
-                fq += ' %s:"%s"' % (param, value)
+                fq_list.append('%s:"%s"' % (param, value))
 
         page = h.get_page_number(request.params)
 
         limit = ITEMS_LIMIT
         data_dict = {
             'q': q,
-            'fq': fq,
+            'fq_list': fq_list,
             'start': (page - 1) * limit,
             'rows': limit,
             'sort': request.params.get('sort', None),
