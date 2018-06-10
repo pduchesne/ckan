@@ -19,7 +19,7 @@
   ["NetCDF", "NetCDF File", "application/netcdf", []],
   ["ArcGIS Map Service", "ArcGIS Map Service", "ArcGIS Map Service", ["arcgis map service"]],
   ["TSV", "Tab Separated Values File", "text/tab-separated-values", ["text/tsv"]],
-  ["WFS", "Web Feature Service", "application/vnd.ogc.wms_xml", ["OGC WFS"]],
+  ["WFS", "Web Feature Service", "application/vnd.ogc.wfs_xml", ["OGC WFS"]],
   ["WMTS", "Web Map Tile Service", null, ["OGC WMTS"]],
   ["ArcGIS Online Map", "ArcGIS Online Map", "ArcGIS Online Map", ["web map application"]],
   ["Perl", "Perl Script", "text/x-perl", []],
