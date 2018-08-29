@@ -323,6 +323,7 @@ def _group_or_org_list(context, data_dict, is_org=False):
     api = context.get('api_version')
     groups = data_dict.get('groups')
     group_type = data_dict.get('type', 'group')
+    not_empty = data_dict.get('not_empty', False)
     ref_group_by = 'id' if api == 2 else 'name'
     pagination_dict = {}
     limit = data_dict.get('limit')
@@ -359,7 +360,7 @@ def _group_or_org_list(context, data_dict, is_org=False):
                                                'package_count', 'title'],
                                total=1)
 
-    if sort_info and sort_info[0][0] == 'package_count':
+    if not_empty or (sort_info and sort_info[0][0] == 'package_count'):
         query = model.Session.query(model.Group.id,
                                     model.Group.name,
                                     sqlalchemy.func.count(model.Group.id))
@@ -368,6 +369,9 @@ def _group_or_org_list(context, data_dict, is_org=False):
                      .filter(model.Member.table_id == model.Package.id) \
                      .filter(model.Member.table_name == 'package') \
                      .filter(model.Package.state == 'active')
+
+        if not_empty:
+            query = query.filter(model.Package.private == False)
     else:
         query = model.Session.query(model.Group.id,
                                     model.Group.name)
@@ -386,12 +390,15 @@ def _group_or_org_list(context, data_dict, is_org=False):
 
     query = query.filter(model.Group.is_organization == is_org)
     query = query.filter(model.Group.type == group_type)
+    if not_empty:
+        query = query.group_by(model.Group.id, model.Group.name)
+        query = query.having(sqlalchemy.func.count(model.Group.id) > 0)
 
     if sort_info:
         sort_field = sort_info[0][0]
         sort_direction = sort_info[0][1]
         if sort_field == 'package_count':
-            query = query.group_by(model.Group.id, model.Group.name)
+            if not not_empty: query = query.group_by(model.Group.id, model.Group.name)
             sort_model_field = sqlalchemy.func.count(model.Group.id)
         elif sort_field == 'name':
             sort_model_field = model.Group.name
