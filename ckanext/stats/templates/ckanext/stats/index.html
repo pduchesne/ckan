@@ -6,7 +6,7 @@
 
 {% block primary_content %}
   <article class="module">
-    <section id="stats-total-datasets" class="module-content tab-content active">
+    <section id="stats-total-datasets" class="module-content tab-content active" style="overflow: visible">
       <h2>{{ _('Total number of Datasets') }}</h2>
 
       {% set xaxis = {'mode': 'time', 'timeformat': '%y-%b'} %}
@@ -29,7 +29,7 @@
       </table>
     </section>
 
-    <section id="stats-dataset-revisions" class="module-content tab-content">
+    <section id="stats-dataset-revisions" class="module-content tab-content" style="overflow: visible">
       <h2>{{ _('Dataset Revisions per Week') }}</h2>
 
       {% set xaxis = {'mode': 'time', 'timeformat': '%y-%b'} %}
