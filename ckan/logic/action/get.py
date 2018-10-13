@@ -1886,7 +1886,7 @@ def package_search(context, data_dict):
 
         result_fl = data_dict.get('fl')
         if not result_fl:
-            data_dict['fl'] = 'id {0}'.format(data_source)
+            data_dict['fl'] = 'id views_total views_recent {0}'.format(data_source)
         else:
             data_dict['fl'] = ' '.join(result_fl)
 
@@ -1931,6 +1931,8 @@ def package_search(context, data_dict):
                 if package_dict:
                     # the package_dict still needs translating when being viewed
                     package_dict = json.loads(package_dict)
+                    package_dict['views_total'] = package.get('views_total')
+                    package_dict['views_recent'] = package.get('views_recent')
                     if context.get('for_view'):
                         for item in plugins.PluginImplementations(
                                 plugins.IPackageController):
