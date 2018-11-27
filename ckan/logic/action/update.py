@@ -114,6 +114,7 @@ def resource_update(context, data_dict):
         updated_pkg_dict = _get_action('package_update')(context, pkg_dict)
         context.pop('defer_commit')
     except ValidationError, e:
+        model.Session.rollback()
         try:
             raise ValidationError(e.error_dict['resources'][-1])
         except (KeyError, IndexError):
