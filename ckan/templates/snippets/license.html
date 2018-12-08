@@ -9,20 +9,22 @@
 
 {% block license %}
   {% if text_only %}
-    {% if pkg_dict.license_id %}
-      {{ license_string(pkg_dict) }}
-    {% elif 'organization' in pkg_dict and pkg_dict['organization']['name'] == 'geopunt' %}
+
+    {% if 'organization' in pkg_dict and pkg_dict['organization']['name'] == 'geopunt' and pkg_dict.license_id == 'geopunt_record_license' %}
         {# Geopunt specific license logic #}
         {% set metadata_request = h.get_pkg_dict_extra(c.pkg_dict, 'metadata_request', '') %}
-        {% if metadata_request and metadata_request.startswith('https://metadata.geopunt.be/zoekdienst') %}
+        {% if metadata_request %}
             {% set parse_url_query = h.parse_url_query(metadata_request) %}
             {% if parse_url_query['id'] %}
                 {% trans url='https://metadata.geopunt.be/zoekdienst/apps/tabsearch/?uuid='+parse_url_query['id'][0] %}
                     See <a href="{{ url }}">original metadata record</a> (Usage Rights)
                 {% endtrans %}
-
             {% endif %}
+        {% else %}
+            {{ _('Missing original record') }}<br/>
         {% endif %}
+    {% elif pkg_dict.license_id %}
+        {{ license_string(pkg_dict) }}
     {% else %}
         {{ _('No License Provided') }}<br/>
     {% endif %}
