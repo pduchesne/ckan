@@ -23,45 +23,6 @@
           </tr>
         {% endif %}
 
-        {% if pkg_dict.author_email %}
-          <tr>
-            <th scope="row" class="dataset-label">{{ _("Author") }}</th>
-            <td class="dataset-details" property="dc:creator">{{ h.mail_to(email_address=pkg_dict.author_email, name=pkg_dict.author) }}</td>
-          </tr>
-        {% elif pkg_dict.author %}
-          <tr>
-            <th scope="row" class="dataset-label">{{ _("Author") }}</th>
-            <td class="dataset-details" property="dc:creator">{{ pkg_dict.author }}</td>
-          </tr>
-        {% endif %}
-
-        {# use ContactPoint instead of maintainer label, as per VODAP mapping definition #}
-        {% if pkg_dict.maintainer_email or pkg_dict.maintainer %}
-          <tr>
-            <th scope="row" class="dataset-label">{{ _('Contact Point') }}</th>
-            <td class="dataset-details" property="dc:contributor">
-                {% if pkg_dict.maintainer_email %}
-                  {{ h.mail_to(email_address=pkg_dict.maintainer_email, name=pkg_dict.maintainer or pkg_dict.maintainer_email) }}
-                {% else %}
-                  {{ pkg_dict.maintainer }}
-                {% endif %}
-
-                {% if extrasDict.contact_uri %}
-                <a href="{{extrasDict.contact_uri}}" class="fa fa-external-link" style="text-decoration: none">
-
-                </a>
-                {% endif %}
-            </td>
-          </tr>
-        {% elif extrasDict.contact_uri %}
-          <tr>
-            <th scope="row" class="dataset-label">{{ _('Contact Point') }}</th>
-            <td class="dataset-details" property="dc:contributor">
-                <a href="{{extrasDict.contact_uri}}">{{extrasDict.contact_uri}}</a>
-            </td>
-          </tr>
-        {% endif %}
-
         {% if pkg_dict.version %}
           <tr>
             <th scope="row" class="dataset-label">{{ _("Version") }}</th>
