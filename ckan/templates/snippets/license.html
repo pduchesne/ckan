@@ -10,7 +10,7 @@
 {% block license %}
   {% if text_only %}
 
-    {% if 'organization' in pkg_dict and pkg_dict['organization']['name'] == 'geopunt' and pkg_dict.license_id == 'geopunt_record_license' %}
+    {% if pkg_dict.license_id == 'geopunt_record_license' %}
         {# Geopunt specific license logic #}
         {% set metadata_request = h.get_pkg_dict_extra(c.pkg_dict, 'metadata_request', '') %}
         {% if metadata_request %}
