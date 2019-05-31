@@ -144,7 +144,7 @@ class AdminController(base.BaseController):
                                                         request.params):
                 if 'purge-packages' in request.params:
                     revs_to_purge = []
-                    limit = 10
+                    limit = int(config.get('ckan.purge.limit', 100))
                     for index, pkg in zip(range(limit), c.deleted_packages):
                         revisions = [x[0] for x in pkg.all_related_revisions]
                         # ensure no accidental purging of other(non-deleted)
