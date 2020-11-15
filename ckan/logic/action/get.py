@@ -368,6 +368,7 @@ def _group_or_org_list(context, data_dict, is_org=False):
         query = query.filter(model.Member.group_id == model.Group.id) \
                      .filter(model.Member.table_id == model.Package.id) \
                      .filter(model.Member.table_name == 'package') \
+                     .filter(model.Member.state == 'active') \
                      .filter(model.Package.state == 'active')
 
         if not_empty:
