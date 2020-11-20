@@ -95,7 +95,11 @@ class ValidationError(ActionError):
 
             for key, error in error_dict.iteritems():
                 if key == 'resources':
-                    summary[_('Resources')] = _('Package resource(s) invalid')
+                    errors_resources = []
+                    for idx, item in enumerate(error):
+                        if len(item):
+                            errors_resources.append('['+str(idx)+'] '+', '.join(item))
+                    summary[_('Resources')] = _('Package resource(s) invalid') + " : " + ', '.join(errors_resources)
                 elif key == 'extras':
                     errors_extras = []
                     for item in error:
